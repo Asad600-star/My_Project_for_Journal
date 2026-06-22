@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use this software or its results, please cite the following."
+title: "Hybrid Forecasting of Stock Price Direction and Volatility Based on Production Logic"
+authors:
+  - family-names: "Ikromov"
+    given-names: "Asadbek"
+    affiliation: "Tashkent International University of Education"
+date-released: 2026-06-01
+version: "1.0.0"
+license: MIT
+keywords:
+  - hybrid ensemble
+  - production rules
+  - volatility forecasting
+  - explainable AI
+  - SHAP
+  - walk-forward validation

@@ -1,0 +1,27 @@
+task,horizon_days,symbol,model,metric_name,metric_value,selection_note,saved_at_utc
+direction,5,AAPL,LOGREG,auc_mean,0.5483040025424246,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,GLD,RF,auc_mean,0.5731248863872935,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,MSFT,LOGREG,auc_mean,0.5381771870841143,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,TSLA,LOGREG,auc_mean,0.5771263468279706,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^DJI,LSTM,auc_mean,0.622329840534468,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^GSPC,LOGREG,auc_mean,0.5291080939856053,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^IRX,LSTM,auc_mean,0.5027573097677284,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^IXIC,HYBRID_VOTING,auc_mean,0.5598571992112021,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^RUT,LSTM,auc_mean,0.5965082045674184,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^TNX,LSTM,auc_mean,0.5412871267172451,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+direction,5,^VIX,LSTM,auc_mean,0.6373138115916385,max auc_mean on walk-forward test,2026-06-19T19:00:53.020567+00:00
+return,5,AAPL,EXTRATREES,rmse_mean,0.0396632147077876,min rmse_mean on walk-forward test,2026-04-05T15:44:17.762783+00:00
+return,5,TSLA,EXTRATREES,rmse_mean,0.0873534731733499,min rmse_mean on walk-forward test,2026-04-05T15:44:17.762783+00:00
+return,5,^GSPC,EXTRATREES,rmse_mean,0.0238639389663883,min rmse_mean on walk-forward test,2026-04-05T15:44:17.762783+00:00
+return,5,^IXIC,EXTRATREES,rmse_mean,0.0304354189219344,min rmse_mean on walk-forward test,2026-04-05T15:44:17.762783+00:00
+volatility,5,AAPL,HYBRID_STACK_REG,rmse_mean,0.00750532207145573,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,GLD,EXTRATREES,rmse_mean,0.004213861782040609,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,MSFT,HYBRID_STACK_REG,rmse_mean,0.006942404585313333,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,TSLA,HYBRID_STACK_REG,rmse_mean,0.015355282106606782,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^DJI,XGB,rmse_mean,0.003861684755214913,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^GSPC,EXTRATREES,rmse_mean,0.004325692845379469,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^IRX,ARIMA,rmse_mean,0.10354241899267638,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^IXIC,EXTRATREES,rmse_mean,0.0054270436518282185,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^RUT,EXTRATREES,rmse_mean,0.004924055566277661,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^TNX,GARCH,rmse_mean,0.016867534725473195,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00
+volatility,5,^VIX,GARCH,rmse_mean,0.051015560367367215,min rmse_mean on walk-forward test,2026-06-20T10:44:59.419007+00:00

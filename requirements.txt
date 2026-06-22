@@ -1,0 +1,32 @@
+# Основные зависимости проекта
+streamlit>=1.32.0
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+xgboost>=2.0.0
+lightgbm>=4.3.0
+shap>=0.45.0
+plotly>=5.18.0
+kaleido>=0.2.1
+sqlalchemy>=2.0.0
+psycopg[binary]>=3.1.0
+psycopg2-binary>=2.9.0
+yfinance>=0.2.0
+python-dotenv>=1.0.0
+matplotlib>=3.8.0
+joblib>=1.3.0
+
+# Telegram bot
+aiogram>=3.4.0
+apscheduler>=3.10.0
+
+# Дополнительно
+requests
+tqdm
+
+# Baselines и статистика для Q1-статьи (LSTM, ARIMA/GARCH, Diebold-Mariano)
+torch>=2.2.0          # LSTM baseline (MPS/CUDA/CPU)
+statsmodels>=0.14.0   # ARIMA baseline
+arch>=7.0.0           # GARCH baseline
+scipy>=1.11.0         # Diebold-Mariano (t-distribution)
+seaborn>=0.13.0       # графики для статьи

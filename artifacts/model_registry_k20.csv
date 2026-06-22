@@ -1,0 +1,17 @@
+task,horizon_days,symbol,model,metric_name,metric_value,selection_note,saved_at_utc
+direction,20,AAPL,LOGREG,auc_mean,0.5580757100719133,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,GLD,LOGREG,auc_mean,0.6581517049813879,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,MSFT,HGB,auc_mean,0.5973338082025667,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,TSLA,XGB,auc_mean,0.6121450535070226,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,^DJI,XGB,auc_mean,0.6007324389589257,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,^GSPC,RF,auc_mean,0.5371318810530826,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,^IXIC,LOGREG,auc_mean,0.5981154697118627,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+direction,20,^RUT,HYBRID_VOTING,auc_mean,0.619557866700923,max auc_mean on walk-forward test,2026-06-14T18:45:25.426697+00:00
+volatility,20,AAPL,HYBRID_STACK_REG,rmse_mean,0.0062735600010473255,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,GLD,XGB,rmse_mean,0.0036843907788783404,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,MSFT,XGB,rmse_mean,0.0051457785906410545,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,TSLA,HYBRID_STACK_REG,rmse_mean,0.010074492593644306,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,^DJI,HYBRID_STACK_REG,rmse_mean,0.0033196083552072633,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,^GSPC,HYBRID_STACK_REG,rmse_mean,0.003791262382155747,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,^IXIC,HYBRID_STACK_REG,rmse_mean,0.004430372419091655,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00
+volatility,20,^RUT,HYBRID_STACK_REG,rmse_mean,0.0033702523282498264,min rmse_mean on walk-forward test,2026-06-14T19:09:34.334817+00:00

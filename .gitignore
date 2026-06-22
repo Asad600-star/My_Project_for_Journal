@@ -1,0 +1,36 @@
+# Секреты
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Системное
+.DS_Store
+**/.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Обученные модели (большие, регенерируются)
+artifacts/models/
+*.pkl
+
+# Временные прогнозы (генерируются на лету)
+artifacts/predictions_latest*.csv
+
+# Логи прогонов
+*.log
+
+# Claude worktrees (рабочие ветки)
+.claude/
+
+# Приватные данные пользователей бота (не коммитить)
+users.json
+subscribers.json

@@ -1,0 +1,17 @@
+task,horizon_days,symbol,model,metric_name,metric_value,selection_note,saved_at_utc
+direction,10,AAPL,HYBRID_STACK,auc_mean,0.5602293978401869,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,GLD,LOGREG,auc_mean,0.5811383068177159,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,MSFT,HYBRID_STACK,auc_mean,0.5710521884546575,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,TSLA,LOGREG,auc_mean,0.5692759317379987,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,^DJI,XGB,auc_mean,0.5475401633544932,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,^GSPC,RF,auc_mean,0.5583531932543904,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,^IXIC,HGB,auc_mean,0.5916160172749955,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+direction,10,^RUT,LOGREG,auc_mean,0.5728565455423542,max auc_mean on walk-forward test,2026-06-14T15:25:04.830469+00:00
+volatility,10,AAPL,EXTRATREES,rmse_mean,0.006829641552234496,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,GLD,EXTRATREES,rmse_mean,0.004155986962796598,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,MSFT,EXTRATREES,rmse_mean,0.005954930405633689,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,TSLA,HYBRID_STACK_REG,rmse_mean,0.011709576052022875,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,^DJI,LGBM,rmse_mean,0.003344210460096731,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,^GSPC,EXTRATREES,rmse_mean,0.0038608353718532448,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,^IXIC,EXTRATREES,rmse_mean,0.004398972181012007,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
+volatility,10,^RUT,XGB,rmse_mean,0.003928199708608633,min rmse_mean on walk-forward test,2026-06-14T16:01:15.883332+00:00
