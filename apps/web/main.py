@@ -70,9 +70,9 @@ with c3:
               result["risk_label_ru"] if is_ru else result["risk_label_en"])
 
 if is_ru:
-    st.info(f"**Вероятность роста ({horizon} дней):** {result['p_up']:.1%} | **Ожидаемая дневная волатильность (следующие {horizon} дней):** {result['vol_pred']:.2%}")
+    st.info(f"**Вероятность роста ({horizon} дней):** {result['p_up_label']} | **Ожидаемая дневная волатильность (следующие {horizon} дней):** {result['vol_pred']:.2%}")
 else:
-    st.info(f"**Probability of rise ({horizon}d):** {result['p_up']:.1%} | **Expected daily volatility (next {horizon} days):** {result['vol_pred']:.2%}")
+    st.info(f"**Probability of rise ({horizon}d):** {result['p_up_label']} | **Expected daily volatility (next {horizon} days):** {result['vol_pred']:.2%}")
 
 st.subheader("🛡️ Risk Management")
 st.success(result["risk_summary_ru"] if is_ru else result["risk_summary_en"])

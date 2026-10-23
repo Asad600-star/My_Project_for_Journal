@@ -41,3 +41,21 @@ def test_inputs_are_clipped():
 def test_risk_summary_states_the_confidence_level_of_its_multiplier(p, vol, level):
     m = rm.evaluate(p, vol)
     assert f"VaR(5d, {level})" in m.risk_summary_en and f"VaR(5д, {level})" in m.risk_summary_ru
+
+
+def test_bounded_probability_changes_no_decision():
+    """The dashboard and the bot show probabilities within [5%, 95%]; every decision
+    of the risk module must be the same for the bounded and the unbounded value."""
+    import numpy as np
+    from services.predict import bounded_probability
+    rm = RiskManager()
+    for p in np.linspace(0.0, 1.0, 1001):
+        q, _, _ = bounded_probability(p)
+        for vol in (0.005, 0.015, 0.022, 0.03):
+            a, b = rm.evaluate(p, vol), rm.evaluate(q, vol)
+            assert (a.recommendation_en, a.position_size, a.confidence_en, a.risk_label_en, a.var_5d_approx) == \
+                   (b.recommendation_en, b.position_size, b.confidence_en, b.risk_label_en, b.var_5d_approx)
+    assert bounded_probability(1.0)[1:] == ("≥ 95%", True)
+    assert bounded_probability(0.0)[1:] == ("≤ 5%", True)
+    assert bounded_probability(0.574) == (0.574, "57.4%", False)
+

@@ -38,6 +38,22 @@ NAME_MAP = {
 # Поддерживаемые горизонты прогноза (дней вперёд)
 SUPPORTED_HORIZONS = [5, 10, 20]
 
+# Calibrated probabilities are shown within [P_FLOOR, P_CAP]. A PAV block that holds
+# only a few calibration days can reach exactly 0 or 1, which overstates the certainty
+# of the forecast. Every decision threshold of the risk module (0.55, 0.58, 0.60 and
+# 0.65) lies inside these bounds, so no recommendation or position size changes.
+P_FLOOR, P_CAP = 0.05, 0.95
+
+
+def bounded_probability(p: float) -> tuple[float, str, bool]:
+    """Probability shown to the user, its label and whether it was bounded."""
+    p = float(p)
+    if p >= P_CAP:
+        return P_CAP, f"≥ {P_CAP:.0%}", True
+    if p <= P_FLOOR:
+        return P_FLOOR, f"≤ {P_FLOOR:.0%}", True
+    return p, f"{p:.1%}", False
+
 
 def _run(cmd: list[str], extra_env: dict | None = None):
     env = os.environ.copy()
@@ -100,12 +116,16 @@ def get_prediction(symbol: str, horizon: int = 5, refresh: bool = False) -> dict
 
     row = matched.iloc[-1].to_dict()
 
+    p_shown, p_label, p_bounded = bounded_probability(row["p_up"])
     pred = {
         "symbol": symbol,
         "name_ru": NAME_MAP.get(symbol, symbol),
         "horizon_days": horizon,
         "asof_date": row["asof_date"],
-        "p_up": round(float(row["p_up"]), 4),
+        "p_up": round(p_shown, 4),                       # used by the risk module
+        "p_up_calibrated": round(float(row["p_up"]), 4),  # PAV output before bounding
+        "p_up_label": p_label,
+        "p_up_bounded": p_bounded,
         "vol_pred": round(float(row["vol_pred"]), 4),
     }
     pred = risk_manager.add_to_prediction(pred)
