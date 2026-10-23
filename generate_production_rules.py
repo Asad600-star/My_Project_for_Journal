@@ -1,3 +1,11 @@
+"""
+OBSOLETE - prototype of the first version of the system, kept for the record only.
+
+It writes 100 template rules on the earlier 39-feature vector. The rule base used
+in the paper is extracted from a CART tree by jobs/extract_rules_from_tree.py and
+stored in production_rules_knowledge_base.json; this script writes to a separate
+file so that it can never overwrite that knowledge base.
+"""
 import json
 from datetime import datetime
 
@@ -91,8 +99,8 @@ output = {
     "rules": rules
 }
 
-with open("production_rules_knowledge_base.json", "w", encoding="utf-8") as f:
+with open("production_rules_prototype_v1.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 
 print("\n" + "=" * 100)
-print(f"Файл 'production_rules_knowledge_base.json' успешно создан!")
+print("Файл 'production_rules_prototype_v1.json' успешно создан!")

@@ -1,23 +1,31 @@
 """
-ARIMA + GARCH baselines для volatility forecasting.
-=========================================================
+DEPRECATED - superseded by jobs/econometric_baselines.py; kept only for the record.
+==================================================================================
+This script evaluated the econometric models on its own fold grid and held one
+forecast constant over each 126-day test block, and it used the dispersion of
+ARIMA mean forecasts as a volatility forecast. Both choices make the comparison
+with daily-updated machine-learning forecasts unfair, so its results are not
+used in the paper. Running it would also overwrite the GARCH rows written by
+jobs/econometric_baselines.py.
 
-Классические эконометрические baselines для статьи Q1:
-- ARIMA(p, d, q) — авто-подбор по AIC, прогноз k-дневной realized volatility
-- GARCH(1, 1) — стандартный GARCH-прогноз conditional variance
+ARIMA + GARCH baselines for volatility forecasting (original description).
 
-Цель: показать в Q1 статье, что предложенный ExtraTrees / HYBRID_STACK_REG
-превосходит классические эконометрические методы (Engle 1982, Bollerslev 1986).
+Classical econometric baselines for the paper:
+- ARIMA(p, d, q): AIC-based order search, k-day realised-volatility forecast
+- GARCH(1, 1): standard conditional-variance forecast
 
-Запуск:
+Goal: show that the proposed ExtraTrees / HYBRID_STACK_REG
+outperform the classical econometric methods (Engle 1982, Bollerslev 1986).
+
+Run:
     python -m jobs.train_arima_garch_baseline
 
-Результаты добавляются в artifacts/metrics_walk_volatility_k5.csv
-с model="ARIMA" и model="GARCH" для прямого сравнения.
+Results are appended to artifacts/metrics_walk_volatility_k5.csv
+with model="ARIMA" and model="GARCH" for direct comparison.
 
-Воспроизводимость:
+Reproducibility:
 - Random seed = 42
-- END_DATE = 2026-06-01 (фиксация для статьи)
+- END_DATE = 2026-06-01 (pinned for the paper)
 """
 from __future__ import annotations
 
@@ -33,10 +41,10 @@ from dotenv import load_dotenv
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sqlalchemy import create_engine, text
 
-# Statsmodels для ARIMA
+# Statsmodels for ARIMA
 from statsmodels.tsa.arima.model import ARIMA
 
-# arch для GARCH
+# arch for GARCH
 from arch import arch_model
 
 warnings.filterwarnings("ignore")
@@ -44,7 +52,7 @@ load_dotenv()
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Конфигурация (синхронизировано с train_baseline.py и LSTM)
+#  Configuration (synced with train_baseline.py and LSTM)
 # ─────────────────────────────────────────────────────────────────────
 SEED = int(os.environ.get("SEED", "42"))
 END_DATE = os.environ.get("END_DATE", "2026-06-01")
@@ -67,7 +75,7 @@ ARTIFACTS_DIR = Path(os.environ.get("METRICS_DIR", "artifacts"))
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 OUT_CSV = ARTIFACTS_DIR / f"metrics_walk_volatility_k{HORIZON_DAYS}.csv"
 
-# Параметры ARIMA авто-подбора
+# ARIMA order-search parameters
 ARIMA_P_RANGE = range(0, 4)
 ARIMA_D_RANGE = [0, 1]
 ARIMA_Q_RANGE = range(0, 4)
@@ -79,12 +87,12 @@ def set_seeds(seed: int = SEED) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Загрузка OHLCV из PostgreSQL
+#  Load OHLCV from PostgreSQL
 # ─────────────────────────────────────────────────────────────────────
 def get_engine():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        raise RuntimeError("DATABASE_URL env var не задан")
+        raise RuntimeError("DATABASE_URL env var is not set")
     return create_engine(db_url, pool_pre_ping=True)
 
 
@@ -103,7 +111,7 @@ def load_close(engine, symbol: str, end_date: str) -> pd.DataFrame:
 
 
 def compute_target_vol(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """Целевая k-дневная realized volatility = std(r_{t+1}, …, r_{t+k})."""
+    """Target k-day realised volatility = std(r_{t+1}, ..., r_{t+k})."""
     df = df.copy()
     fut = pd.concat(
         [df["simple_return"].shift(-i) for i in range(1, horizon + 1)],
@@ -117,7 +125,7 @@ def compute_target_vol(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
 #  ARIMA baseline
 # ─────────────────────────────────────────────────────────────────────
 def find_best_arima_order(returns: np.ndarray, max_p: int = 3, max_d: int = 1, max_q: int = 3) -> tuple[int, int, int]:
-    """Авто-подбор ARIMA(p, d, q) по AIC."""
+    """ARIMA(p, d, q) order search by AIC."""
     best_aic = np.inf
     best_order = (1, 0, 1)
     for p in range(max_p + 1):
@@ -137,10 +145,10 @@ def find_best_arima_order(returns: np.ndarray, max_p: int = 3, max_d: int = 1, m
 
 
 def forecast_arima_volatility(returns_train: np.ndarray, horizon: int) -> float:
-    """Прогноз volatility по ARIMA:
-    1) Подбираем ARIMA на returns
-    2) Прогнозируем k шагов вперёд
-    3) Volatility = std прогнозируемых returns
+    """Volatility forecast via ARIMA:
+    1) Fit ARIMA on returns
+    2) Forecast k steps ahead
+    3) Volatility = std of forecast returns
     """
     if len(returns_train) < 100:
         return float(np.std(returns_train, ddof=0))
@@ -150,10 +158,10 @@ def forecast_arima_volatility(returns_train: np.ndarray, horizon: int) -> float:
         model = ARIMA(returns_train, order=order)
         res = model.fit(method="statespace", disp=False)
         forecast = res.forecast(steps=horizon)
-        # Volatility = std прогнозируемых returns
+        # Volatility = std of forecast returns
         return float(np.std(forecast, ddof=0)) if len(forecast) > 1 else float(np.abs(forecast.iloc[0]))
     except Exception:
-        # Fallback: историческая volatility
+        # Fallback: historical volatility
         return float(np.std(returns_train[-horizon * 5 :], ddof=0))
 
 
@@ -161,31 +169,31 @@ def forecast_arima_volatility(returns_train: np.ndarray, horizon: int) -> float:
 #  GARCH(1,1) baseline
 # ─────────────────────────────────────────────────────────────────────
 def forecast_garch_volatility(returns_train: np.ndarray, horizon: int) -> float:
-    """Прогноз volatility по GARCH(1, 1):
-    1) Подгоняем GARCH(1, 1) на returns
-    2) Прогнозируем conditional variance на k шагов
-    3) Volatility = sqrt средней variance
+    """Volatility forecast via GARCH(1, 1):
+    1) Fit GARCH(1, 1) on returns
+    2) Forecast conditional variance k steps ahead
+    3) Volatility = sqrt of mean variance
     """
     if len(returns_train) < 100:
         return float(np.std(returns_train, ddof=0))
 
     try:
-        # Возвращаем returns в % для численной стабильности
+        # Scale returns to % for numerical stability
         ret_pct = returns_train * 100.0
         am = arch_model(ret_pct, vol="GARCH", p=1, q=1, dist="normal", rescale=False)
         res = am.fit(disp="off", show_warning=False)
         forecast = res.forecast(horizon=horizon, reindex=False)
         variances = forecast.variance.values[0]
-        # Средняя volatility за горизонт
+        # Mean volatility over the horizon
         avg_vol_pct = np.sqrt(np.mean(variances))
-        # Перевод обратно в долю
+        # Convert back to a fraction
         return float(avg_vol_pct / 100.0)
     except Exception:
         return float(np.std(returns_train[-horizon * 5 :], ddof=0))
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Walk-forward для одной модели одного символа
+#  Walk-forward for one model and one instrument
 # ─────────────────────────────────────────────────────────────────────
 @dataclass
 class RowReg:
@@ -223,11 +231,11 @@ def evaluate_split(
 
 
 def run_arima_garch_walk_forward(engine, symbol: str) -> list[RowReg]:
-    """Walk-forward для ARIMA и GARCH одновременно (одни и те же фолды)."""
-    print(f"\n[ARIMA/GARCH] === Символ: {symbol} ===")
+    """Walk-forward for ARIMA and GARCH jointly (same folds)."""
+    print(f"\n[ARIMA/GARCH] === Instrument: {symbol} ===")
     df = load_close(engine, symbol, END_DATE)
     if len(df) < WF_MIN_TRAIN_ROWS + WF_VAL_DAYS + WF_TEST_DAYS:
-        print(f"[ARIMA/GARCH] {symbol}: недостаточно данных, пропускаем")
+        print(f"[ARIMA/GARCH] {symbol}: not enough data, skipping")
         return []
 
     n = len(df)
@@ -253,18 +261,18 @@ def run_arima_garch_walk_forward(engine, symbol: str) -> list[RowReg]:
 
         print(f"[ARIMA/GARCH] {symbol} fold={fold}: train={len(tr)} val={len(va)} test={len(te)}")
 
-        # Rolling forecast: на каждом дне в val/test прогнозируем используя только прошлые данные
-        # Для скорости: один ARIMA/GARCH на каждый фолд (на train данных), прогноз = константа на весь val/test
-        # Это стандартный подход для baseline (более тонкий rolling expensive)
+        # Rolling forecast: each val/test day uses only past data
+        # For speed: one ARIMA/GARCH per fold (on train), constant forecast over val/test
+        # Standard baseline approach (finer rolling is expensive)
 
         returns_train = tr["simple_return"].values
 
-        # ─── ARIMA прогноз ───
+        # --- ARIMA forecast ---
         arima_vol = forecast_arima_volatility(returns_train, HORIZON_DAYS)
         arima_pred_val = np.full(len(va), arima_vol)
         arima_pred_test = np.full(len(te), arima_vol)
 
-        # ─── GARCH прогноз ───
+        # --- GARCH forecast ---
         garch_vol = forecast_garch_volatility(returns_train, HORIZON_DAYS)
         garch_pred_val = np.full(len(va), garch_vol)
         garch_pred_test = np.full(len(te), garch_vol)
@@ -272,11 +280,11 @@ def run_arima_garch_walk_forward(engine, symbol: str) -> list[RowReg]:
         y_va = va["target_vol_kd"].values
         y_te = te["target_vol_kd"].values
 
-        # Сохраняем ARIMA результаты
+        # Store ARIMA results
         results.append(evaluate_split(symbol, fold, "val", "ARIMA", y_va, arima_pred_val, f"vol={arima_vol:.6f}"))
         results.append(evaluate_split(symbol, fold, "test", "ARIMA", y_te, arima_pred_test, f"vol={arima_vol:.6f}"))
 
-        # Сохраняем GARCH результаты
+        # Store GARCH results
         results.append(evaluate_split(symbol, fold, "val", "GARCH", y_va, garch_pred_val, f"vol={garch_vol:.6f}"))
         results.append(evaluate_split(symbol, fold, "test", "GARCH", y_te, garch_pred_test, f"vol={garch_vol:.6f}"))
 
@@ -294,19 +302,19 @@ def run_arima_garch_walk_forward(engine, symbol: str) -> list[RowReg]:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Сохранение
+#  Saving
 # ─────────────────────────────────────────────────────────────────────
 def append_to_metrics_csv(rows: list[RowReg]) -> None:
     if not rows:
-        print("[ARIMA/GARCH] Нет результатов для сохранения")
+        print("[ARIMA/GARCH] No results to save")
         return
 
     new_df = pd.DataFrame([asdict(r) for r in rows])
 
     if OUT_CSV.exists():
         old = pd.read_csv(OUT_CSV)
-        # Удаляем только ARIMA/GARCH строки для ТЕХ символов, что пересчитываем
-        # (чтобы досчёт новых тикеров не стирал старые результаты).
+        # Drop only ARIMA/GARCH rows for the symbols being recomputed
+        # (so adding new tickers does not erase earlier results).
         recomputed_symbols = set(new_df["symbol"].unique())
         mask_drop = old["model"].isin(["ARIMA", "GARCH"]) & old["symbol"].isin(recomputed_symbols)
         old = old[~mask_drop]
@@ -315,8 +323,8 @@ def append_to_metrics_csv(rows: list[RowReg]) -> None:
         combined = new_df
 
     combined.to_csv(OUT_CSV, index=False)
-    print(f"\n[ARIMA/GARCH] Сохранено {len(rows)} строк в {OUT_CSV}")
-    print(f"[ARIMA/GARCH] Общее количество строк в файле: {len(combined)}")
+    print(f"\n[ARIMA/GARCH] Saved {len(rows)} rows to {OUT_CSV}")
+    print(f"[ARIMA/GARCH] Total rows in file: {len(combined)}")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -324,12 +332,12 @@ def append_to_metrics_csv(rows: list[RowReg]) -> None:
 # ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     print("=" * 70)
-    print(" ARIMA + GARCH baselines для volatility forecasting")
+    print(" ARIMA + GARCH baselines for volatility forecasting")
     print("=" * 70)
     print(f" Random seed:   {SEED}")
-    print(f" END_DATE:      {END_DATE} (фиксация для статьи)")
-    print(f" Horizon:       k = {HORIZON_DAYS} дней")
-    print(f" Символы:       {SYMBOLS}")
+    print(f" END_DATE:      {END_DATE} (pinned for the paper)")
+    print(f" Horizon:       k = {HORIZON_DAYS} days")
+    print(f" Instruments:   {SYMBOLS}")
     print("=" * 70)
 
     set_seeds(SEED)
@@ -347,12 +355,12 @@ def main() -> None:
 
     append_to_metrics_csv(all_results)
 
-    # Сводка
+    # Summary
     if all_results:
         df = pd.DataFrame([asdict(r) for r in all_results])
         test_df = df[df["split"] == "test"]
         if not test_df.empty:
-            print("\n[ARIMA/GARCH] Сводка по test split:")
+            print("\n[ARIMA/GARCH] Test-split summary:")
             for model in ["ARIMA", "GARCH"]:
                 sub = test_df[test_df["model"] == model]
                 if not sub.empty:

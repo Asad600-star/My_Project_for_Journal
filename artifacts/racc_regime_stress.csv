@@ -1,0 +1,4 @@
+scenario,lam,n_train,n_calib,n_test,mean_realised_vol,held_static,held_adaptive,held_online,max_excess_static,max_excess_adaptive,max_excess_online,mean_abs_gap_online,n_days,max_bound_excess_online,max_excess_online_daily,risk_static@0.3,risk_adaptive@0.3,cov_static@0.3,cov_adaptive@0.3,risk_online@0.3,cov_online@0.3,risk_static@0.45,risk_adaptive@0.45,cov_static@0.45,cov_adaptive@0.45,risk_online@0.45,cov_online@0.45
+Reference 2024-2026 (Table 13),1.0,15440,968,4796,0.01242,0.62,1.0,0.44,0.2155,-0.0375,0.0091,0.0031,600,0.0766,0.0099,0.0376,0.1337,0.065,0.163,0.2989,0.355,0.5655,0.2607,0.596,0.316,0.4474,0.467
+COVID crash 2020,1.0,7376,984,832,0.02636,0.12,0.12,0.5,0.4822,0.2829,0.0513,0.0727,104,0.4423,0.0513,0.5878,0.5829,0.913,0.9,0.3419,0.576,0.5878,0.5878,0.913,0.913,0.4136,0.763
+Bear market 2022,0.75,11416,984,2008,0.01713,0.0,0.0,0.06,0.3212,0.1471,0.0143,0.0087,251,0.1833,0.0143,0.4038,0.3756,0.421,0.39,0.3057,0.254,0.607,0.5168,0.643,0.552,0.4578,0.427

@@ -1,23 +1,22 @@
 """
-Загрузка дополнительных тикеров для расширения универсума в Q1 статье.
+Ingestion of additional tickers to expand the instrument universe for the paper.
 =====================================================================
 
-Добавляем 4 новых символа к существующим (AAPL, TSLA, ^GSPC, ^IXIC):
+Adds 4 new instruments to the existing ones (AAPL, TSLA, ^GSPC, ^IXIC):
 
-- **^DJI**  — Dow Jones Industrial Average (крупные cap, classic blue-chip index)
-- **^RUT**  — Russell 2000 (small-cap, другой market segment)
-- **GLD**   — SPDR Gold Trust (другой asset class — золото, защитный)
-- **MSFT**  — Microsoft (ещё одна крупная tech акция)
+- **^DJI**  : Dow Jones Industrial Average (large-cap, classic blue-chip index)
+- **^RUT**  : Russell 2000 (small-cap, a different market segment)
+- **GLD**   : SPDR Gold Trust (a different asset class: gold, defensive)
+- **MSFT**  : Microsoft (another large-cap tech equity)
 
-Цель: показать в статье обобщение метода на разные классы активов и капитализации.
+Goal: demonstrate generalisation across asset classes and market caps.
 
-Запуск:
+Run:
     python -m jobs.ingest_additional_tickers
 """
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
 
 import pandas as pd
 import yfinance as yf
@@ -27,7 +26,7 @@ from sqlalchemy import create_engine, text
 load_dotenv()
 
 
-# Дополнительные тикеры (расширение универсума для Q1)
+# Additional tickers (universe expansion)
 ADDITIONAL_SYMBOLS = ["^DJI", "^RUT", "GLD", "MSFT"]
 START_DATE = os.environ.get("START_DATE", "2015-01-01")
 END_DATE = os.environ.get("END_DATE", "2026-06-01")
@@ -36,7 +35,7 @@ END_DATE = os.environ.get("END_DATE", "2026-06-01")
 def get_engine():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        raise RuntimeError("DATABASE_URL env var не задан")
+        raise RuntimeError("DATABASE_URL env var is not set")
     return create_engine(db_url, pool_pre_ping=True)
 
 
@@ -61,8 +60,8 @@ def ensure_market_table(engine) -> None:
 
 
 def download_one(symbol: str, start: str, end: str) -> pd.DataFrame:
-    """Загружает OHLCV для одного символа из yfinance."""
-    print(f"[INGEST] {symbol}: загрузка с {start} по {end}...")
+    """Loads OHLCV for one instrument from yfinance."""
+    print(f"[INGEST] {symbol}: downloading from {start} to {end}...")
     df = (
         yf.download(
             symbol,
@@ -77,7 +76,7 @@ def download_one(symbol: str, start: str, end: str) -> pd.DataFrame:
     )
 
     if df.empty:
-        print(f"[WARN] {symbol}: пустые данные")
+        print(f"[WARN] {symbol}: empty data")
         return df
 
     if isinstance(df.columns, pd.MultiIndex):
@@ -97,12 +96,12 @@ def download_one(symbol: str, start: str, end: str) -> pd.DataFrame:
     df = df[keep].copy()
     df["date"] = pd.to_datetime(df["date"]).dt.date
     df["symbol"] = symbol
-    print(f"[INGEST] {symbol}: {len(df)} строк ({df['date'].min()} … {df['date'].max()})")
+    print(f"[INGEST] {symbol}: {len(df)} rows ({df['date'].min()} .. {df['date'].max()})")
     return df
 
 
 def upsert_rows(engine, rows: list[dict]) -> int:
-    """UPSERT строк в market_ohlcv."""
+    """UPSERTs rows into market_ohlcv."""
     if not rows:
         return 0
 
@@ -128,10 +127,10 @@ def upsert_rows(engine, rows: list[dict]) -> int:
 
 def main() -> None:
     print("=" * 70)
-    print(" Загрузка дополнительных тикеров для Q1 статьи")
+    print(" Ingesting additional tickers for the paper")
     print("=" * 70)
-    print(f" Символы: {ADDITIONAL_SYMBOLS}")
-    print(f" Период:  {START_DATE} … {END_DATE}")
+    print(f" Instruments: {ADDITIONAL_SYMBOLS}")
+    print(f" Period:  {START_DATE} .. {END_DATE}")
     print("=" * 70)
 
     engine = get_engine()
@@ -148,17 +147,17 @@ def main() -> None:
                 r["source"] = "yfinance"
             n = upsert_rows(engine, rows)
             total += n
-            print(f"[OK] {sym}: upserted {n} строк")
+            print(f"[OK] {sym}: upserted {n} rows")
         except Exception as e:
             print(f"[ERROR] {sym}: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n[DONE] Загружено всего: {total} строк")
-    print("\n[NEXT] После загрузки нужно:")
-    print("  1. Пересчитать features_daily через jobs/build_features.py")
-    print("  2. Обновить SYMBOLS в train_lstm_baseline.py и train_arima_garch_baseline.py")
-    print("  3. Запустить полное обучение на 8 символах")
+    print(f"\n[DONE] Total ingested: {total} rows")
+    print("\n[NEXT] After ingestion:")
+    print("  1. Rebuild features_daily via jobs/build_features.py")
+    print("  2. Update SYMBOLS in train_lstm_baseline.py and train_arima_garch_baseline.py")
+    print("  3. Run full training on the 8 instruments")
 
 
 if __name__ == "__main__":

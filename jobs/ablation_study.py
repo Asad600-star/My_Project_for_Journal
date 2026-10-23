@@ -1,25 +1,25 @@
 """
-Ablation Study — какие компоненты системы реально вносят вклад?
+Ablation study — which system components actually contribute?
 ================================================================
 
-Для Q1 reviewer вопрос: "Все ли эти компоненты нужны?"
-Ablation study убирает по очереди каждую группу признаков и показывает,
-как падает качество прогноза.
+Reviewer question: "Are all of these components necessary?"
+The ablation removes each feature group in turn and shows
+how forecast quality degrades.
 
-Тестируется ExtraTrees (главный регрессор) с разными подмножествами признаков:
+ExtraTrees (the main regressor) is tested on different feature subsets:
 
-    1. PRICE_ONLY:        5 признаков    (только OHLCV)
-    2. PRICE+TECHNICAL:   29 признаков    (+24 технических)
-    3. PRICE+TECH+LAG:    34 признака     (+5 лагов)
-    4. ALL_NO_MACRO:      42 признака     (без 14 макро)
-    5. ALL_NO_REGIME:     48 признаков    (без 8 regime)
-    6. ALL_FULL:          56 признаков    ← полная система
+    1. PRICE_ONLY:        5 features     (OHLCV only)
+    2. PRICE+TECHNICAL:   29 features    (+24 technical)
+    3. PRICE+TECH+LAG:    34 features    (+5 lags)
+    4. ALL_NO_MACRO:      42 features    (without 14 macro)
+    5. ALL_NO_REGIME:     48 features    (without 8 regime)
+    6. ALL_FULL:          56 features    <- full system
 
-Ожидаемый результат для статьи:
-- Чем больше групп признаков, тем лучше прогноз
-- Каждая группа даёт значимый вклад
+Expected result:
+- More feature groups -> better forecast
+- Each group contributes meaningfully
 
-Запуск:
+Run:
     python -m jobs.ablation_study
 """
 from __future__ import annotations
@@ -37,11 +37,19 @@ from sklearn.ensemble import ExtraTreesRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sqlalchemy import create_engine, text
 
+# Use the SAME canonical 56-feature pipeline as the production models, so the
+# ablation operates on exactly the feature vector of Tables II and V.
+from jobs.train_baseline import (
+    add_technical_features as tb_add_technical,
+    build_feature_matrix,
+    compute_targets,
+)
+
 warnings.filterwarnings("ignore")
 load_dotenv()
 
 
-# Конфигурация (синхронизировано с LSTM/ARIMA)
+# Configuration (synced with LSTM/ARIMA)
 SEED = int(os.environ.get("SEED", "42"))
 END_DATE = os.environ.get("END_DATE", "2026-06-01")
 HORIZON_DAYS = int(os.environ.get("HORIZON_DAYS", "5"))
@@ -51,7 +59,7 @@ WF_VAL_DAYS = int(os.environ.get("WF_VAL_DAYS", "126"))
 WF_TEST_DAYS = int(os.environ.get("WF_TEST_DAYS", "126"))
 WF_STEP_DAYS = int(os.environ.get("WF_STEP_DAYS", "63"))
 
-# Те же 8 символов что в LSTM
+# The same 8 instruments as in LSTM
 SYMBOLS_DEFAULT = ["AAPL", "TSLA", "^GSPC", "^IXIC", "^DJI", "^RUT", "GLD", "MSFT"]
 SYMBOLS_ENV = os.environ.get("SYMBOLS", "")
 SYMBOLS = (
@@ -71,43 +79,37 @@ def set_seeds(seed: int = SEED) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Признаки разбиваем на 5 групп
+#  Features are split into 5 groups
 # ─────────────────────────────────────────────────────────────────────
+# Canonical 56-feature partition (identical to Table II of the paper).
+# 5 price + 25 technical + 5 lag + 13 macro + 8 regime = 56.
 FEATURE_GROUPS = {
     "price": [
         "open", "high", "low", "close", "volume",
     ],
     "technical": [
-        "log_return", "simple_return",
-        "ema_5", "ema_10", "ema_26", "ema_50", "ema_5_minus_26",
-        "sma_5", "sma_20",
-        "volatility_5", "volatility_10", "volatility_20",
-        "rsi_14",
-        "macd_line", "macd_signal", "macd_hist",
-        "bb_mean_20", "bb_std_20", "bb_width_20",
+        "return_1d", "log_return",
+        "sma_5", "volatility_5", "sma_10", "volatility_10", "sma_20", "volatility_20",
         "hl_range", "oc_return",
         "mom_5", "mom_10", "mom_20",
-        "atr_14", "atrp_14", "vol_z_20", "ret_std_20",
+        "rsi_14", "ema_12", "ema_26", "macd", "macd_signal", "macd_hist",
+        "bb_width_20", "atr_14", "atrp_14", "vol_z_20", "ret_std_20", "ret_mean_20",
     ],
     "lag": [
         "return_lag_1", "return_lag_2", "return_lag_3", "return_lag_4", "return_lag_5",
     ],
     "macro": [
-        "vix_close", "irx_level", "tnx_level",
-        "vix_return", "vix_ma_20", "vix_z_60",
-        "mkt_return_1d", "yc_slope", "vix_x_mktret",
-        "tnx_change", "irx_change",
-        "tnx_z_60", "irx_z_60",
+        "mkt_return_1d", "mkt_log_return", "mkt_mom_5", "mkt_mom_10", "mkt_mom_20", "mkt_vol_20",
+        "vix_level", "vix_return_1d", "vix_change_1d",
+        "irx_level", "irx_change_1d", "tnx_level", "tnx_change_1d",
     ],
     "regime": [
-        "mkt_mom_5", "mkt_mom_10", "mkt_mom_20",
-        "mkt_vol_20",
-        "mkt_trend_5", "mkt_trend_20", "mkt_risk_20",
-        "corr_mkt_60", "beta_mkt_60",
+        "corr_mkt_60", "beta_mkt_60", "mkt_trend_20", "mkt_risk_20",
+        "vix_log", "vix_z_60", "vix_x_mktret", "yc_slope",
     ],
 }
 
-# Ablation сценарии (какие группы оставить)
+# Ablation scenarios (which groups to keep)
 ABLATION_SCENARIOS = {
     "PRICE_ONLY": ["price"],
     "PRICE+TECH": ["price", "technical"],
@@ -119,12 +121,12 @@ ABLATION_SCENARIOS = {
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Загрузка + построение признаков (копия LSTM скрипта)
+#  Load + build features (mirrors the LSTM script)
 # ─────────────────────────────────────────────────────────────────────
 def get_engine():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        raise RuntimeError("DATABASE_URL env var не задан")
+        raise RuntimeError("DATABASE_URL env var is not set")
     return create_engine(db_url, pool_pre_ping=True)
 
 
@@ -258,7 +260,7 @@ def compute_target_vol(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Walk-forward для одного символа × одного сценария
+#  Walk-forward for one instrument x one scenario
 # ─────────────────────────────────────────────────────────────────────
 @dataclass
 class AblationRow:
@@ -274,7 +276,7 @@ class AblationRow:
 
 
 def get_features_for_scenario(scenario: str) -> list[str]:
-    """Возвращает список признаков для данного ablation сценария."""
+    """Returns the feature list for the given ablation scenario."""
     groups = ABLATION_SCENARIOS[scenario]
     cols = []
     for g in groups:
@@ -282,17 +284,39 @@ def get_features_for_scenario(scenario: str) -> list[str]:
     return cols
 
 
+def load_features(engine, symbol: str) -> pd.DataFrame:
+    """Loads the same features_daily columns used by the production models."""
+    q = text("""
+        SELECT symbol, date,
+               open, high, low, close, volume,
+               return_1d, log_return,
+               sma_5, volatility_5, sma_10, volatility_10, sma_20, volatility_20,
+               return_lag_1, return_lag_2, return_lag_3, return_lag_4, return_lag_5,
+               mkt_return_1d, mkt_log_return, mkt_mom_5, mkt_mom_10, mkt_mom_20, mkt_vol_20,
+               vix_level, vix_return_1d, vix_change_1d,
+               irx_level, irx_change_1d, tnx_level, tnx_change_1d
+        FROM features_daily
+        WHERE symbol = :sym
+        ORDER BY date ASC
+    """)
+    df = pd.read_sql(q, engine, params={"sym": symbol}, parse_dates=["date"])
+    return df[df["date"] <= pd.to_datetime(END_DATE)].reset_index(drop=True)
+
+
 def run_ablation_for_symbol(engine, symbol: str) -> list[AblationRow]:
-    """Walk-forward ablation для одного символа со всеми сценариями."""
+    """Walk-forward ablation for one instrument across all scenarios."""
     print(f"\n[ABLATION] === {symbol} ===")
-    df = load_ohlcv(engine, symbol)
+    df = load_features(engine, symbol)
     if len(df) < WF_MIN_TRAIN_ROWS + WF_VAL_DAYS + WF_TEST_DAYS:
-        print(f"[ABLATION] {symbol}: недостаточно данных, пропускаем")
+        print(f"[ABLATION] {symbol}: not enough data, skipping")
         return []
 
-    df = add_technical_features(df)
-    df = add_macro_and_regime_features(df, engine)
-    df = df.dropna().reset_index(drop=True)
+    # Canonical 56-feature matrix (identical to Tables II and V).
+    df = tb_add_technical(df)
+    df, _canon = build_feature_matrix(df)
+    if df.empty:
+        print(f"[ABLATION] {symbol}: empty after feature build, skipping")
+        return []
 
     n = len(df)
     start_idx = WF_MIN_TRAIN_ROWS
@@ -304,30 +328,34 @@ def run_ablation_for_symbol(engine, symbol: str) -> list[AblationRow]:
 
     while i <= last_start:
         tr = df.iloc[:i].copy()
-        va = df.iloc[i : i + WF_VAL_DAYS].copy()
+        # the validation block is skipped, as in the walk-forward protocol of train_baseline
         te = df.iloc[i + WF_VAL_DAYS : i + WF_VAL_DAYS + WF_TEST_DAYS].copy()
 
-        tr = compute_target_vol(tr, HORIZON_DAYS).dropna(subset=["target_vol_kd"])
-        va = compute_target_vol(va, HORIZON_DAYS).dropna(subset=["target_vol_kd"])
-        te = compute_target_vol(te, HORIZON_DAYS).dropna(subset=["target_vol_kd"])
+        # Targets computed within each split (no cross-split leakage).
+        tr = compute_targets(tr, HORIZON_DAYS)
+        te = compute_targets(te, HORIZON_DAYS)
 
-        if len(tr) < 500 or len(va) < 80 or len(te) < 80:
+        if len(tr) < 500 or len(te) < 80:
             i += WF_STEP_DAYS
             continue
 
         y_tr = tr["target_vol_kd"].values
         y_te = te["target_vol_kd"].values
 
-        # Для каждого ablation сценария обучаем модель
+        # Train a model for each ablation scenario
         for scenario in ABLATION_SCENARIOS:
-            feature_cols = get_features_for_scenario(scenario)
-            # Только те колонки, которые реально есть
-            feature_cols = [c for c in feature_cols if c in df.columns]
-            X_tr = tr[feature_cols].values.astype(np.float32)
-            X_te = te[feature_cols].values.astype(np.float32)
+            # columns in the canonical order of build_feature_matrix: the random splits of
+            # ExtraTrees depend on the column order, and with the same order the full scenario
+            # reproduces the EXTRATREES model of the walk-forward run (Table 6) exactly
+            wanted = set(get_features_for_scenario(scenario))
+            feature_cols = [c for c in _canon if c in wanted]
+            X_tr = tr[feature_cols].values
+            X_te = te[feature_cols].values
 
             model = ExtraTreesRegressor(
                 n_estimators=500,
+                max_depth=12,
+                min_samples_leaf=10,
                 random_state=SEED,
                 n_jobs=-1,
             )
@@ -358,9 +386,9 @@ def run_ablation_for_symbol(engine, symbol: str) -> list[AblationRow]:
 # ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     print("=" * 70)
-    print(" ABLATION STUDY — какие группы признаков нужны?")
+    print(" ABLATION STUDY — which feature groups are needed?")
     print("=" * 70)
-    print(f" Модель:    ExtraTrees (главный регрессор для volatility)")
+    print(" Model:     ExtraTrees (main volatility regressor)")
     print(f" Horizon:   k = {HORIZON_DAYS}")
     print(f" Seed:      {SEED}")
     print(f" END_DATE:  {END_DATE}")
@@ -382,16 +410,16 @@ def main() -> None:
             traceback.print_exc()
 
     if not all_rows:
-        print("[WARN] Нет результатов")
+        print("[WARN] No results")
         return
 
     df = pd.DataFrame([asdict(r) for r in all_rows])
     df.to_csv(OUT_CSV, index=False)
-    print(f"\n[ARTIFACT] Сохранено: {OUT_CSV} ({len(df)} строк)")
+    print(f"\n[ARTIFACT] Saved: {OUT_CSV} ({len(df)} rows)")
 
-    # Сводка для статьи
+    # Summary for the paper
     print("\n" + "=" * 70)
-    print(" СВОДКА: средний RMSE по сценариям (test split)")
+    print(" SUMMARY: mean RMSE by scenario (test split)")
     print("=" * 70)
 
     summary = (
@@ -406,9 +434,9 @@ def main() -> None:
     )
     print(summary.to_string(index=False))
 
-    # Pivot для статьи: символ × сценарий
+    # Pivot for the paper: instrument x scenario
     print("\n" + "=" * 70)
-    print(" PIVOT для статьи (symbol × scenario, mean RMSE)")
+    print(" PIVOT for the paper (symbol x scenario, mean RMSE)")
     print("=" * 70)
     pivot = df.pivot_table(
         index="symbol",
@@ -416,7 +444,7 @@ def main() -> None:
         values="rmse",
         aggfunc="mean",
     )
-    # Упорядочим колонки по числу признаков
+    # Order columns by feature count
     col_order = ["PRICE_ONLY", "PRICE+TECH", "PRICE+TECH+LAG", "ALL_NO_MACRO", "ALL_NO_REGIME", "ALL_FULL"]
     col_order = [c for c in col_order if c in pivot.columns]
     pivot = pivot[col_order]
@@ -424,7 +452,7 @@ def main() -> None:
 
     pivot_path = ARTIFACTS_DIR / "ablation_pivot.csv"
     pivot.to_csv(pivot_path)
-    print(f"\n[ARTIFACT] Pivot table сохранён: {pivot_path}")
+    print(f"\n[ARTIFACT] Pivot table saved: {pivot_path}")
 
 
 if __name__ == "__main__":

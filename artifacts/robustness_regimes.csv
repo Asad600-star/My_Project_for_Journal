@@ -1,0 +1,4 @@
+regime,days,n_obs,mean_realised_vol,extratrees_rmse,persistence_rmse,ratio_et_vs_persist,direction_auc
+COVID crash (2020),104,832,0.02636,0.01999,0.02135,0.936,0.493
+Bear market (2022),251,2008,0.01713,0.00781,0.00821,0.952,0.603
+Calm / bull (rest),1232,9852,0.01232,0.00794,0.00873,0.91,0.535

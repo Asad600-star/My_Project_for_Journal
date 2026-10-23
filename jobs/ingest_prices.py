@@ -143,7 +143,7 @@ def main() -> None:
         """
     )
 
-    print(f"[DB] Using DATABASE_URL={db_url}")
+    print(f"[DB] Using {engine.url.render_as_string(hide_password=True)}")
     print(
         f"[INFO] Symbols={symbols}, START_DATE={start_date}, LOOKBACK_DAYS={lookback_days}, SOURCE={source}, "
         f"INGEST_FULL_REFRESH={int(full_refresh)}, INGEST_FORCE_SYMBOLS='{force_symbols_raw}'"

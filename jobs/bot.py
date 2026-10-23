@@ -135,7 +135,7 @@ def _format_prediction(result: dict, lang: str = "ru") -> str:
             f"🔹 Уверенность: {result['confidence_ru']}\n"
             f"🔹 Риск: {result['risk_label_ru']}\n\n"
             f"📊 Вероятность роста ({hd}д): <b>{result['p_up']:.1%}</b>\n"
-            f"📊 Волатильность ({hd}д): <b>{result['vol_pred']:.2%}</b>\n\n"
+            f"📊 Дневная волатильность (след. {hd}д): <b>{result['vol_pred']:.2%}</b>\n\n"
             f"🛡️ {result['risk_summary_ru']}"
         )
     return (
@@ -145,7 +145,7 @@ def _format_prediction(result: dict, lang: str = "ru") -> str:
         f"🔹 Confidence: {result['confidence_en']}\n"
         f"🔹 Risk: {result['risk_label_en']}\n\n"
         f"📊 P(up): <b>{result['p_up']:.1%}</b>\n"
-        f"📊 Volatility: <b>{result['vol_pred']:.2%}</b>\n\n"
+        f"📊 Daily volatility (next days): <b>{result['vol_pred']:.2%}</b>\n\n"
         f"🛡️ {result['risk_summary_en']}"
     )
 

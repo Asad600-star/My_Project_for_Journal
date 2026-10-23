@@ -26,7 +26,7 @@ cd ~/Documents/GitHub/Master_of_Degree
 # Создать виртуальное окружение и поставить зависимости
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-lock.txt   # точные версии, с которыми получены результаты статьи
 
 # Создать .env из шаблона (если ещё нет)
 cp .env.example .env
@@ -93,9 +93,9 @@ python -m jobs.bot
 bash reproduce_results.sh
 ```
 
-Это пройдёт все 8 шагов: загрузка данных → признаки → обучение → baselines → sensitivity → ablation → Diebold-Mariano → таблицы. Займёт ~3-5 часов. Все числа сохранятся в `artifacts/`.
+Это пройдёт все 13 шагов: замороженный снимок данных → признаки → модели (k = 5) → глубокие модели → эконометрика и H-ECON-ET → тесты значимости и рисунки → горизонты k = 10, 20 → абляция и SHAP → правила → бэктест → RACC → схемы → автотесты. Займёт около 10 часов (проверено 19.10.2026). Все числа сохранятся в `artifacts/`, рисунки — в `figures/`.
 
-Зафиксировано для воспроизводимости: `SEED=42`, `END_DATE=2026-06-01`, `START=2015-01-01`.
+Зафиксировано для воспроизводимости: `SEED=42`, `END_DATE=2026-06-01`, `START=2015-01-01`; глубокие модели обучаются на CPU в один поток, поэтому результаты совпадают бит в бит.
 
 ---
 
@@ -111,22 +111,23 @@ python -m jobs.backtest
 
 ---
 
-## 7️⃣ Сгенерировать таблицы для статьи
+## 7️⃣ Ежедневное обновление (цены → признаки → прогнозы для сайта и бота)
 
 ```bash
-python -m jobs.generate_paper_tables
+python -m jobs.daily_update
 ```
 
-Все таблицы (direction, volatility, DM-тест, sensitivity, ablation) в `artifacts/paper_tables.txt`.
+Загружает новые цены всех 8 инструментов и ^VIX, ^IRX, ^TNX, пересчитывает признаки и прогнозы на 5, 10 и 20 дней (`artifacts/predictions_latest_k*.csv`).
+
+> Таблицы статьи строятся из `artifacts/` (см. `reproduce_results.sh`); старый скрипт `jobs.generate_paper_tables` больше не используется.
 
 ---
 
 ## 🧩 Отдельные операции (если нужно)
 
 ```bash
-# Только загрузить свежие данные
+# Только загрузить свежие данные (все символы из SYMBOLS в .env)
 python -m jobs.ingest_prices
-python -m jobs.ingest_additional_tickers
 
 # Пересчитать признаки
 python -m jobs.build_features
@@ -137,14 +138,23 @@ TASK=direction HORIZON_DAYS=5 python -m jobs.train_baseline
 # Обучить volatility-модели
 TASK=volatility HORIZON_DAYS=5 python -m jobs.train_baseline
 
-# LSTM baseline (для статьи)
-python -m jobs.train_lstm_baseline
+# Deep baselines для статьи (LSTM, GRU, Transformer; N-BEATSx для волатильности)
+python -m jobs.train_deep_baselines
+TASK=volatility MODELS=NBEATSX python -m jobs.train_deep_baselines
 
-# ARIMA + GARCH baselines (для статьи)
-python -m jobs.train_arima_garch_baseline
+# Эконометрические baselines (GARCH, GJR-GARCH, HAR) и модель волатильности H-ECON-ET
+python -m jobs.econometric_baselines
+python -m jobs.volatility_models
 
-# Diebold-Mariano тест значимости
+# Тесты значимости (Diebold-Mariano, Friedman-Nemenyi)
 python -m jobs.diebold_mariano_test
+python -m jobs.statistical_tests
+
+# Все таблицы и рисунки статьи одной командой
+bash reproduce_results.sh
+
+# Автотесты
+python -m pytest -q tests
 ```
 
 ---

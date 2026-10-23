@@ -1,11 +1,15 @@
 """Risk management module.
 
-Корректные формулы:
-- expected_return_5d = p_up * upside - (1 - p_up) * downside,
-  где upside ≈ vol_pred (1 sigma), downside ≈ vol_pred.
-- VaR (95%): z * sigma_5d = 1.645 * vol_pred (нормальное приближение).
-- Sharpe (приведённый к году): (mu_daily / sigma_daily) * sqrt(252),
-  где mu_daily = expected_return_5d / 5, sigma_daily = vol_pred / sqrt(5).
+vol_pred is the forecast realised volatility sigma_{t,5}: the standard deviation
+of the next five DAILY log-returns, i.e. a daily-scale quantity. All five-day
+quantities are therefore scaled by sqrt(5), as in Equations 25, 27 and 28 of
+the paper:
+
+- sigma_5d            = vol_pred * sqrt(5)
+- expected_return_5d  = (2 * p_up - 1) * sigma_5d
+- VaR (5 days)        = z * sigma_5d, with z = 1.645 / 1.96 / 2.33 for
+                        Buy / Consider / Do not buy
+- Sharpe (annualised) = (expected_return_5d / sigma_5d) * sqrt(252 / 5)
 """
 
 from dataclasses import dataclass
@@ -49,14 +53,14 @@ class RiskManager:
             rec_ru, rec_en = "Покупать", "Buy"
             conf_key = "high" if p_up >= 0.65 else "medium"
             risk_key = "low"
-            position = "8-12% капитала"
+            position = "10% капитала"
             no_trade = False
             var_mult = 1.645
         elif p_up >= self.consider_threshold:
             rec_ru, rec_en = "Задуматься о покупке", "Consider Buying"
             conf_key = "medium" if p_up >= 0.58 else "low"
             risk_key = "medium"
-            position = "4-6% капитала"
+            position = "5% капитала"
             no_trade = False
             var_mult = 1.96
         else:
@@ -67,25 +71,20 @@ class RiskManager:
             no_trade = True
             var_mult = 2.33
 
-        # ---- Метрики ----
-        # Ожидаемый возврат за 5 дней (грубая оценка через 1-sigma)
-        expected_return_5d = p_up * vol_pred - (1.0 - p_up) * vol_pred  # = (2*p_up - 1) * vol_pred
-
-        # VaR: z * sigma на горизонте 5 дней
-        var_5d = round(var_mult * vol_pred, 4)
-
-        # Sharpe (annualized)
-        if vol_pred > 1e-9:
-            mu_daily = expected_return_5d / 5.0
-            sigma_daily = vol_pred / sqrt(5.0)
-            sharpe = float(round((mu_daily / sigma_daily) * sqrt(252.0), 2))
+        # ---- Metrics (vol_pred is daily-scale; five-day quantities scale with sqrt(5)) ----
+        sigma_5d = vol_pred * sqrt(5.0)
+        expected_return_5d = (2.0 * p_up - 1.0) * sigma_5d
+        var_5d = round(var_mult * sigma_5d, 4)
+        if sigma_5d > 1e-9:
+            sharpe = float(round((expected_return_5d / sigma_5d) * sqrt(252.0 / 5.0), 2))
         else:
             sharpe = 0.0
 
-        risk_summary_ru = f"Риск: {_RISK_RU[risk_key]} • Позиция: {position} • VaR(5д, 95%): {var_5d:.2%}"
+        level = {1.645: "95%", 1.96: "97.5%", 2.33: "99%"}[var_mult]      # confidence level of z
+        risk_summary_ru = f"Риск: {_RISK_RU[risk_key]} • Позиция: {position} • VaR(5д, {level}): {var_5d:.2%}"
         risk_summary_en = (
             f"Risk: {risk_key} • Position: {position.replace('капитала', 'of capital').replace('избегать','avoid')} "
-            f"• VaR(5d, 95%): {var_5d:.2%}"
+            f"• VaR(5d, {level}): {var_5d:.2%}"
         )
 
         return RiskMetrics(

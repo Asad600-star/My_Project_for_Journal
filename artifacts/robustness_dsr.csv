@@ -1,0 +1,2 @@
+selected_trial,n_trials,n_obs,sharpe_annualised,expected_max_sharpe_null_ann,skewness,kurtosis,deflated_sharpe_prob
+Ungated @ 0bps,20,599,0.582,1.099,2.0,25.385,0.205

@@ -1,28 +1,35 @@
-"""Полноценный walk-forward бэктест.
+"""Walk-forward economic back-test of the decision pipeline (Table 11 of the paper).
 
-Стратегия:
-1. На каждой исторической дате t (после WF_MIN_TRAIN) обучаем direction-модель
-   на [start, t]. Если AUC модели в реестре < 0.5 — используем LOGREG fallback.
-2. Берём предсказание p_up для t. Если p_up >= threshold → открываем LONG позицию
-   на k=HORIZON_DAYS дней (вход по close[t], выход по close[t+k]).
-3. Размер позиции: из RiskManager.position_size_pct (10% / 5% / 0%).
-4. Комиссия: BACKTEST_FEE_BPS (по умолчанию 5 bps на каждую сторону).
-5. Одновременно одна позиция на инструмент (новые сигналы игнорируются пока активна старая).
+The back-test applies the system exactly as it runs in production, using only
+information available at each date:
 
-Метрики:
-- Total return, CAGR, Sharpe (annualized), Max Drawdown, Win-rate, # trades.
-- Сравнение с buy & hold для каждого инструмента.
+1. Every RETRAIN_EVERY trading days the direction model (HYBRID_VOTING by default,
+   the same model for every instrument) and the ExtraTrees volatility model are
+   refitted on all labelled history before the current date, except for the most
+   recent CALIB_DAYS rows (plus a purge of k rows), which are held out to fit the
+   isotonic PAV calibrator of the direction probability.
+2. On each trading date t >= BACKTEST_START_DATE without an open position, the
+   calibrated probability p_up and the volatility forecast are passed to the
+   RiskManager; a LONG position of the recommended size (10% / 5% / 0% of capital)
+   is opened at close[t] and closed at close[t+k].
+3. Commission: BACKTEST_FEE_BPS per side. One position per instrument at a time.
 
-Запуск:
+The comparison is passive buy-and-hold over exactly the same trading window.
+
+Metrics: total return, CAGR, annualised Sharpe, maximum drawdown, win rate and
+number of trades per instrument, and an equal-weight portfolio. The equity curve is
+marked to market at every close, so the drawdown includes losses of open positions.
+
+Run:
     python -m jobs.backtest
 
-Параметры (через .env):
-    BACKTEST_START_DATE=2022-01-01
-    BACKTEST_FEE_BPS=5
-    BACKTEST_PROB_THRESHOLD=0.55
-    BACKTEST_INITIAL_CAPITAL=100000
-    BACKTEST_RETRAIN_EVERY=21
-    HORIZON_DAYS=5
+Parameters (environment):
+    TRAIN_START_DATE=2015-01-01   start of the history used for training
+    END_DATE=2026-06-01           last date of the sample
+    BACKTEST_START_DATE=2022-01-01 first trading date
+    BACKTEST_MODEL=HYBRID_VOTING  direction model
+    BACKTEST_FEE_BPS=5, BACKTEST_PROB_THRESHOLD=0.55, BACKTEST_RETRAIN_EVERY=21,
+    BACKTEST_CALIB_DAYS=252, BACKTEST_INITIAL_CAPITAL=100000, HORIZON_DAYS=5
 """
 
 import os
@@ -38,12 +45,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / ".env")
 
+from sklearn.isotonic import IsotonicRegression
+
 from jobs.train_baseline import (
     add_technical_features,
     build_feature_matrix,
     compute_targets,
     get_model_by_name,
-    select_best_models,
 )
 from core.risk.risk_manager import RiskManager
 
@@ -56,6 +64,10 @@ INITIAL_CAPITAL = float(os.environ.get("BACKTEST_INITIAL_CAPITAL", "100000"))
 
 WF_MIN_TRAIN = int(os.environ.get("BACKTEST_MIN_TRAIN", "500"))
 RETRAIN_EVERY = int(os.environ.get("BACKTEST_RETRAIN_EVERY", "21"))
+DATA_START = os.environ.get("TRAIN_START_DATE", "2015-01-01")
+END_DATE = os.environ.get("END_DATE", "2026-06-01")         # last date of the paper's sample
+MODEL_NAME = os.environ.get("BACKTEST_MODEL", "HYBRID_VOTING")
+CALIB_DAYS = int(os.environ.get("BACKTEST_CALIB_DAYS", "252"))
 
 ARTIFACTS = ROOT / "artifacts"
 ARTIFACTS.mkdir(exist_ok=True)
@@ -106,14 +118,14 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
                    vix_level, vix_return_1d, vix_change_1d,
                    irx_level, irx_change_1d, tnx_level, tnx_change_1d
             FROM features_daily
-            WHERE symbol = :symbol AND date >= :start
+            WHERE symbol = :symbol AND date >= :start AND date <= :end
             ORDER BY date
         """),
-        con=engine, params={"symbol": symbol, "start": BACKTEST_START},
+        con=engine, params={"symbol": symbol, "start": DATA_START, "end": END_DATE},
         parse_dates=["date"],
     )
     if df.empty:
-        print(f"[WARN] {symbol}: нет данных с {BACKTEST_START}")
+        print(f"[WARN] {symbol}: no data from {DATA_START}")
         return pd.DataFrame(), {}, []
 
     df = df.replace([np.inf, -np.inf], np.nan)
@@ -127,8 +139,11 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
         return pd.DataFrame(), {}, []
 
     n = len(df2)
-    if n < WF_MIN_TRAIN + HORIZON_DAYS + 5:
-        print(f"[WARN] {symbol}: мало строк ({n})")
+    dates = pd.to_datetime(df2["date"])
+    first = int(np.searchsorted(dates.values, np.datetime64(pd.to_datetime(BACKTEST_START))))
+    first = max(first, WF_MIN_TRAIN + CALIB_DAYS)
+    if first >= n - HORIZON_DAYS:
+        print(f"[WARN] {symbol}: too few rows ({n}) for a back-test from {BACKTEST_START}")
         return pd.DataFrame(), {}, []
 
     fee = FEE_BPS / 10000.0
@@ -141,15 +156,15 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
     trades = []
     eq_curve = []
 
-    model = None
+    model = vol_model = iso = None
     last_train_idx = -10**9
 
-    for i in range(WF_MIN_TRAIN, n):
+    for i in range(first, n):
         today = df2.iloc[i]
         today_close = float(today["close"])
         today_date = pd.to_datetime(today["date"]).date()
 
-        # === Выход из позиции ===
+        # === Exit ===
         if exit_at_idx is not None and i >= exit_at_idx:
             exit_price = today_close
             ret = (exit_price / entry_price) - 1.0
@@ -175,52 +190,46 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
             entry_date = None
             exit_at_idx = None
 
-        # === Сигнал на сегодня ===
+        # === Signal ===
         if position_size == 0.0:
-            # Переобучение
+            # Refit every RETRAIN_EVERY days. compute_targets drops the last k rows of
+            # the history, so every label used here is resolved before day i.
             if i - last_train_idx >= RETRAIN_EVERY or model is None:
-                tr = df2.iloc[:i].copy()
-                tr_lab = compute_targets(tr, HORIZON_DAYS)
-                if len(tr_lab) < 200:
-                    eq_curve.append({"date": str(today_date), "equity": equity})
-                    continue
-
-                X_tr = tr_lab[feature_cols].values
-                y_tr = tr_lab["target_direction"].values
-
+                lab = compute_targets(df2.iloc[:i].copy(), HORIZON_DAYS)
+                fit = lab.iloc[:len(lab) - CALIB_DAYS - HORIZON_DAYS]   # purge k rows before calibration
+                cal = lab.iloc[len(lab) - CALIB_DAYS:]
                 try:
-                    model_obj, _ = get_model_by_name("direction", dir_model_name)
-                    model_obj.fit(X_tr, y_tr)
-                    model = model_obj
+                    model, _ = get_model_by_name("direction", dir_model_name)
+                    model.fit(fit[feature_cols].values, fit["target_direction"].values)
+                    p_cal_block = model.predict_proba(cal[feature_cols].values)[:, 1]
+                    iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(
+                        p_cal_block, cal["target_direction"].values)
+                    vol_model, _ = get_model_by_name("volatility", "EXTRATREES")
+                    vol_model.fit(fit[feature_cols].values, fit["target_vol_kd"].values)
                     last_train_idx = i
-                except Exception as e:
-                    print(f"[WARN] {symbol}@{today_date}: fit failed: {e}")
+                except Exception as ex:
+                    print(f"[WARN] {symbol}@{today_date}: fit failed: {ex}")
                     eq_curve.append({"date": str(today_date), "equity": equity})
                     continue
 
-            # Прогноз на текущей строке
             X_now = df2.iloc[[i]][feature_cols].values
-            try:
-                if hasattr(model, "predict_proba"):
-                    p_up = float(model.predict_proba(X_now)[:, 1][0])
-                else:
-                    s = float(model.decision_function(X_now)[0])
-                    p_up = 1.0 / (1.0 + np.exp(-s))
-            except Exception as e:
-                print(f"[WARN] {symbol}@{today_date}: predict failed: {e}")
-                p_up = 0.5
+            p_up = float(iso.predict(model.predict_proba(X_now)[:, 1])[0])
+            vol_hat = max(0.0, float(vol_model.predict(X_now)[0]))
 
-            # Открываем сделку
             if p_up >= THRESHOLD:
-                last_vol = float(df2.iloc[i].get("volatility_5", 0.02) or 0.02)
-                pos_pct = risk_mgr.position_size_pct(p_up, last_vol)
+                pos_pct = risk_mgr.position_size_pct(p_up, vol_hat)
                 if pos_pct > 0:
                     position_size = pos_pct
                     entry_price = today_close
                     entry_date = today_date
                     exit_at_idx = i + HORIZON_DAYS
 
-        eq_curve.append({"date": str(today_date), "equity": equity})
+        # equity marked to market at today's close (entry commission already paid)
+        if position_size > 0.0 and entry_price is not None:
+            mtm = equity + position_size * equity * (today_close / entry_price - 1.0 - fee)
+        else:
+            mtm = equity
+        eq_curve.append({"date": str(today_date), "equity": mtm})
 
     # Закрываем висящую позицию
     if position_size > 0 and entry_price is not None:
@@ -243,6 +252,8 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
             "equity_after": round(equity, 2),
             "holding_days": "open->close",
         })
+        if eq_curve:                                   # the last point carries the realised result
+            eq_curve[-1]["equity"] = equity
 
     eq_df = pd.DataFrame(eq_curve)
     if eq_df.empty:
@@ -264,7 +275,7 @@ def _backtest_symbol(engine, symbol: str, dir_model_name: str) -> tuple[pd.DataF
     avg_ret_per_trade = float(trades_df["ret_pct"].mean()) if n_trades else 0.0
 
     # Buy & Hold
-    bh_close = df2["close"].values
+    bh_close = df2["close"].values[first:]
     bh_first = float(bh_close[0])
     bh_last = float(bh_close[-1])
     bh_total = bh_last / bh_first - 1.0 if bh_first > 0 else float("nan")
@@ -304,10 +315,9 @@ def main():
     print(f"   horizon:     {HORIZON_DAYS} days")
     print(f"   capital:     ${INITIAL_CAPITAL:,.0f}")
     print(f"   retrain ev.: {RETRAIN_EVERY} days")
+    print(f"   model:       {MODEL_NAME} + isotonic calibration on the last {CALIB_DAYS} labelled days")
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-    selected = select_best_models(HORIZON_DAYS)
-    direction_models = selected.get("direction", {})
 
     only_symbol = (os.environ.get("ONLY_SYMBOL") or "").strip()
     if only_symbol:
@@ -319,28 +329,13 @@ def main():
             con=engine,
         )["symbol"].tolist()
 
-    # AUC из реестра — для fallback на LOGREG если AUC<0.5
-    reg_path = ARTIFACTS / f"model_registry_k{HORIZON_DAYS}.csv"
-    auc_map = {}
-    if reg_path.exists():
-        reg = pd.read_csv(reg_path)
-        rd = reg[reg["task"] == "direction"]
-        for _, r in rd.iterrows():
-            try:
-                auc_map[r["symbol"]] = float(r["metric_value"])
-            except Exception:
-                pass
-
     all_eq = []
     summaries = []
     all_trades = []
     for sym in symbols:
-        chosen = direction_models.get(sym, "LOGREG")
-        if auc_map.get(sym, 1.0) < 0.50:
-            print(f"[WARN] {sym}: registry AUC={auc_map[sym]:.3f} < 0.5 → fallback на LOGREG")
-            chosen = "LOGREG"
-
-        eq_df, summary, trades = _backtest_symbol(engine, sym, chosen)
+        # the same model for every instrument: choosing a model per instrument from
+        # the walk-forward test results would select on the evaluation period
+        eq_df, summary, trades = _backtest_symbol(engine, sym, MODEL_NAME)
         if not eq_df.empty:
             all_eq.append(eq_df)
             summaries.append(summary)

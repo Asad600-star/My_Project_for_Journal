@@ -1,29 +1,32 @@
 """
+SUPERSEDED by jobs/train_deep_baselines.py, which trains the LSTM, GRU and
+Transformer baselines reported in the paper under one protocol. Kept for the record.
+
 LSTM baseline for direction forecasting.
 ================================================================
 
-Сравнительный baseline для статьи: LSTM на тех же 56 причинных признаках,
-что и HYBRID_VOTING / HYBRID_STACK, с идентичным walk-forward CV (K=14).
+Comparative baseline for the paper: an LSTM on the same 56 causal features
+as HYBRID_VOTING / HYBRID_STACK, with an identical walk-forward CV.
 
-Цель: показать в Q1 статье, что предложенный HYBRID подход
-превосходит классический deep-learning baseline LSTM.
+Goal: show in the paper that the proposed HYBRID approach
+outperforms the classical deep-learning LSTM baseline.
 
-Архитектура:
+Architecture:
     Input  -> (batch, seq_len=20, n_features=56)
-    LSTM   -> 2 слоя, hidden=32, dropout=0.2
+    LSTM   -> 2 layers, hidden=32, dropout=0.2
     Dense  -> 32 -> 16 -> 1
-    Output -> Sigmoid (вероятность направления вверх)
+    Output -> Sigmoid (probability of an up move)
 
-Запуск:
+Run:
     python -m jobs.train_lstm_baseline
 
-Результаты добавляются в artifacts/metrics_walk_direction_k5.csv
-с model="LSTM" для прямого сравнения с другими моделями.
+Results are appended to artifacts/metrics_walk_direction_k5.csv
+with model="LSTM" for direct comparison with the other models.
 
-Воспроизводимость:
-- Random seed зафиксирован (SEED=42 по умолчанию)
-- END_DATE = 2026-06-01 (фиксация для статьи; убрать env END_DATE для актуальных данных)
-- Все гиперпараметры можно изменить через env переменные
+Reproducibility:
+- Random seed is fixed (SEED=42 by default)
+- END_DATE = 2026-06-01 (pinned for the paper; unset env END_DATE for live data)
+- All hyperparameters can be overridden via env variables
 """
 from __future__ import annotations
 
@@ -53,19 +56,19 @@ load_dotenv()
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Конфигурация (воспроизводимость + та же сетка фолдов что у HYBRID)
+#  Configuration (reproducibility + the same fold grid as HYBRID)
 # ─────────────────────────────────────────────────────────────────────
 SEED = int(os.environ.get("SEED", "42"))
-END_DATE = os.environ.get("END_DATE", "2026-06-01")  # фиксация для статьи
+END_DATE = os.environ.get("END_DATE", "2026-06-01")  # pinned for the paper
 HORIZON_DAYS = int(os.environ.get("HORIZON_DAYS", "5"))
 
-# Параметры walk-forward (идентичны train_baseline.py)
+# Walk-forward parameters (identical to train_baseline.py)
 WF_MIN_TRAIN_ROWS = int(os.environ.get("WF_MIN_TRAIN_ROWS", "1200"))
 WF_VAL_DAYS = int(os.environ.get("WF_VAL_DAYS", "126"))
 WF_TEST_DAYS = int(os.environ.get("WF_TEST_DAYS", "126"))
 WF_STEP_DAYS = int(os.environ.get("WF_STEP_DAYS", "63"))
 
-# Гиперпараметры LSTM
+# LSTM hyperparameters
 SEQ_LEN = int(os.environ.get("SEQ_LEN", "20"))
 LSTM_HIDDEN = int(os.environ.get("LSTM_HIDDEN", "32"))
 LSTM_LAYERS = int(os.environ.get("LSTM_LAYERS", "2"))
@@ -75,8 +78,8 @@ LSTM_PATIENCE = int(os.environ.get("LSTM_PATIENCE", "10"))
 LSTM_LR = float(os.environ.get("LSTM_LR", "1e-3"))
 LSTM_BATCH = int(os.environ.get("LSTM_BATCH", "32"))
 
-# Символы (расширенный список для Q1: 4 индекса + 4 акции/asset = 8 всего)
-# Можно переопределить через env: SYMBOLS="AAPL,TSLA,^GSPC,^IXIC,^DJI,^RUT,GLD,MSFT"
+# Instruments (8 total: 4 indices + 4 equities/asset)
+# Can be overridden via env: SYMBOLS="AAPL,TSLA,^GSPC,^IXIC,^DJI,^RUT,GLD,MSFT"
 SYMBOLS_DEFAULT = ["AAPL", "TSLA", "^GSPC", "^IXIC", "^DJI", "^RUT", "GLD", "MSFT"]
 SYMBOLS_ENV = os.environ.get("SYMBOLS", "")
 SYMBOLS = (
@@ -85,13 +88,13 @@ SYMBOLS = (
     else SYMBOLS_DEFAULT
 )
 
-# Выходные пути
+# Output paths
 ARTIFACTS_DIR = Path(os.environ.get("METRICS_DIR", "artifacts"))
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 OUT_CSV = ARTIFACTS_DIR / f"metrics_walk_direction_k{HORIZON_DAYS}.csv"
 
 
-# Фиксация random seeds для полной воспроизводимости
+# Fix random seeds for full reproducibility
 def set_seeds(seed: int = SEED) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -103,7 +106,7 @@ def set_seeds(seed: int = SEED) -> None:
         torch.mps.manual_seed(seed)
 
 
-# Выбор устройства (MPS на Mac M-series, CUDA на NVIDIA, иначе CPU)
+# Device selection (MPS on Apple M-series, CUDA on NVIDIA, else CPU)
 def get_device() -> torch.device:
     if torch.cuda.is_available():
         return torch.device("cuda")
@@ -116,17 +119,17 @@ DEVICE = get_device()
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Загрузка данных из PostgreSQL (та же таблица что у train_baseline)
+#  Data loading from PostgreSQL (same table as train_baseline)
 # ─────────────────────────────────────────────────────────────────────
 def get_engine():
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
-        raise RuntimeError("DATABASE_URL env var не задан")
+        raise RuntimeError("DATABASE_URL env var is not set")
     return create_engine(db_url, pool_pre_ping=True)
 
 
 def load_ohlcv(engine, symbol: str, end_date: str) -> pd.DataFrame:
-    """Загружает OHLCV из market_ohlcv с фиксацией END_DATE для воспроизводимости."""
+    """Loads OHLCV from market_ohlcv, pinned to END_DATE for reproducibility."""
     q = text("""
         SELECT date, open, high, low, close, adj_close, volume
         FROM market_ohlcv
@@ -139,7 +142,7 @@ def load_ohlcv(engine, symbol: str, end_date: str) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Технические признаки (тот же 56-мерный вектор что у HYBRID)
+#  Technical features (the same 56-dimensional vector as HYBRID)
 # ─────────────────────────────────────────────────────────────────────
 def _ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False).mean()
@@ -165,7 +168,7 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
 
 
 def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Строит 24 технических признака (копия train_baseline.py)."""
+    """Builds 24 technical features (mirrors train_baseline.py)."""
     df = df.copy()
     df["log_return"] = np.log(df["close"] / df["close"].shift(1))
     df["simple_return"] = df["close"].pct_change()
@@ -198,7 +201,7 @@ def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
     )
     df["ret_std_20"] = df["simple_return"].rolling(20).std(ddof=0)
 
-    # Лаги (5)
+    # Lags (5)
     for k in range(1, 6):
         df[f"return_lag_{k}"] = df["simple_return"].shift(k)
 
@@ -206,10 +209,10 @@ def add_technical_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_macro_and_regime_features(df: pd.DataFrame, engine) -> pd.DataFrame:
-    """Добавляет 14 макро признаков (^VIX/^IRX/^TNX) + 8 regime признаков."""
+    """Adds 14 macro features (^VIX/^IRX/^TNX) + 8 regime features."""
     df = df.copy()
 
-    # Загружаем макро тикеры
+    # Load macro tickers
     macro_q = text("""
         SELECT date, symbol, close
         FROM market_ohlcv
@@ -223,7 +226,7 @@ def add_macro_and_regime_features(df: pd.DataFrame, engine) -> pd.DataFrame:
     macro_pivot = macro_pivot.reset_index()
     df = df.merge(macro_pivot, on="date", how="left")
 
-    # Макро features
+    # Macro features
     df["vix_return"] = df["vix_close"].pct_change()
     df["vix_ma_20"] = df["vix_close"].rolling(20).mean()
     df["vix_z_60"] = (df["vix_close"] - df["vix_close"].rolling(60).mean()) / (
@@ -259,14 +262,14 @@ def add_macro_and_regime_features(df: pd.DataFrame, engine) -> pd.DataFrame:
 
 
 def get_feature_columns(df: pd.DataFrame) -> list[str]:
-    """Возвращает 56 признаков в стандартном порядке (как у HYBRID)."""
+    """Returns the 56 features in standard order (as in HYBRID)."""
     exclude = {"date", "symbol", "log_return", "target_direction"}
     cols = [c for c in df.columns if c not in exclude and df[c].dtype in (float, "float64", "float32", int, "int64", "int32")]
     return cols
 
 
 def compute_target_direction(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
-    """Бинарная цель: 1 если C_{t+k} >= C_t, иначе 0."""
+    """Binary target: 1 if C_{t+k} >= C_t else 0."""
     df = df.copy()
     df["target_return_kd"] = df["close"].shift(-horizon) / df["close"] - 1
     df["target_direction"] = (df["target_return_kd"] >= 0).astype(int)
@@ -274,10 +277,10 @@ def compute_target_direction(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  LSTM модель (PyTorch)
+#  LSTM model (PyTorch)
 # ─────────────────────────────────────────────────────────────────────
 class LSTMClassifier(nn.Module):
-    """2-слойный LSTM для бинарной классификации направления."""
+    """Two-layer LSTM for binary direction classification."""
 
     def __init__(
         self,
@@ -302,7 +305,7 @@ class LSTMClassifier(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (batch, seq_len, n_features)
         out, (h, c) = self.lstm(x)
-        last = out[:, -1, :]  # последний timestep
+        last = out[:, -1, :]  # last timestep
         z = self.dropout(last)
         z = self.relu(self.fc1(z))
         logit = self.fc2(z).squeeze(-1)
@@ -310,7 +313,7 @@ class LSTMClassifier(nn.Module):
 
 
 def make_sequences(X: np.ndarray, y: np.ndarray, seq_len: int) -> tuple[np.ndarray, np.ndarray]:
-    """Преобразует (n_rows, 56) -> (n_seqs, seq_len, 56), каждая seq = последние seq_len дней."""
+    """Reshapes (n_rows, 56) -> (n_seqs, seq_len, 56); each seq = last seq_len days."""
     n = len(X)
     if n <= seq_len:
         return np.empty((0, seq_len, X.shape[1])), np.empty((0,))
@@ -329,10 +332,10 @@ def train_lstm_one_fold(
     y_val: np.ndarray,
     n_features: int,
 ) -> tuple[LSTMClassifier, StandardScaler]:
-    """Обучение LSTM на одном фолде с early stopping по val AUC."""
+    """Trains the LSTM on one fold with early stopping on validation AUC."""
     set_seeds(SEED)
 
-    # Стандартизация (fit только на train)
+    # Standardisation (fit on train only)
     scaler = StandardScaler()
     n_tr = X_train.shape[0]
     X_train_flat = X_train.reshape(-1, n_features)
@@ -341,7 +344,7 @@ def train_lstm_one_fold(
     X_train_s = scaler.transform(X_train_flat).reshape(X_train.shape)
     X_val_s = scaler.transform(X_val_flat).reshape(X_val.shape)
 
-    # Перевод в тензоры
+    # Convert to tensors
     X_tr_t = torch.tensor(X_train_s, dtype=torch.float32).to(DEVICE)
     y_tr_t = torch.tensor(y_train, dtype=torch.float32).to(DEVICE)
     X_va_t = torch.tensor(X_val_s, dtype=torch.float32).to(DEVICE)
@@ -374,7 +377,7 @@ def train_lstm_one_fold(
             optimizer.step()
             epoch_loss += loss.item()
 
-        # Val AUC для early stopping
+        # Validation AUC for early stopping
         model.eval()
         with torch.no_grad():
             val_logits = model(X_va_t).cpu().numpy()
@@ -399,7 +402,7 @@ def train_lstm_one_fold(
 
 
 def predict_lstm(model: LSTMClassifier, scaler: StandardScaler, X: np.ndarray, n_features: int) -> np.ndarray:
-    """Предсказание вероятности на новых данных."""
+    """Predicts probabilities on new data."""
     if len(X) == 0:
         return np.array([])
     X_flat = X.reshape(-1, n_features)
@@ -412,7 +415,7 @@ def predict_lstm(model: LSTMClassifier, scaler: StandardScaler, X: np.ndarray, n
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Walk-forward CV для одного символа
+#  Walk-forward CV for one instrument
 # ─────────────────────────────────────────────────────────────────────
 @dataclass
 class RowClf:
@@ -436,7 +439,7 @@ class RowClf:
 def evaluate_split(
     sym: str, fold: int, split_name: str, y_true: np.ndarray, y_pred: np.ndarray, y_prob: np.ndarray, threshold: float
 ) -> RowClf:
-    """Расчёт метрик для одного split."""
+    """Computes metrics for one split."""
     try:
         auc = float(roc_auc_score(y_true, y_prob)) if len(np.unique(y_true)) > 1 else 0.5
     except Exception:
@@ -461,11 +464,11 @@ def evaluate_split(
 
 
 def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
-    """Полный walk-forward LSTM для одного символа."""
-    print(f"\n[LSTM] === Символ: {symbol} ===")
+    """Full walk-forward LSTM for one instrument."""
+    print(f"\n[LSTM] === Instrument: {symbol} ===")
     df = load_ohlcv(engine, symbol, END_DATE)
     if len(df) < WF_MIN_TRAIN_ROWS + WF_VAL_DAYS + WF_TEST_DAYS:
-        print(f"[LSTM] {symbol}: недостаточно данных ({len(df)} строк), пропускаем")
+        print(f"[LSTM] {symbol}: not enough data ({len(df)} rows), skipping")
         return []
 
     df = add_technical_features(df)
@@ -474,7 +477,7 @@ def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
 
     feature_cols = get_feature_columns(df)
     n_features = len(feature_cols)
-    print(f"[LSTM] {symbol}: {len(df)} строк, {n_features} признаков")
+    print(f"[LSTM] {symbol}: {len(df)} rows, {n_features} features")
 
     n = len(df)
     start_idx = WF_MIN_TRAIN_ROWS
@@ -489,7 +492,7 @@ def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
         va = df.iloc[i : i + WF_VAL_DAYS].copy()
         te = df.iloc[i + WF_VAL_DAYS : i + WF_VAL_DAYS + WF_TEST_DAYS].copy()
 
-        # Целевая переменная вычисляется ВНУТРИ split (как в train_baseline.py)
+        # Target is computed INSIDE the split (as in train_baseline.py)
         tr = compute_target_direction(tr, HORIZON_DAYS).dropna(subset=["target_direction"])
         va = compute_target_direction(va, HORIZON_DAYS).dropna(subset=["target_direction"])
         te = compute_target_direction(te, HORIZON_DAYS).dropna(subset=["target_direction"])
@@ -505,7 +508,7 @@ def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
         y_va_raw = va["target_direction"].values.astype(np.float32)
         y_te_raw = te["target_direction"].values.astype(np.float32)
 
-        # Преобразование в последовательности (seq_len = SEQ_LEN)
+        # Reshape into sequences (seq_len = SEQ_LEN)
         X_tr_seq, y_tr_seq = make_sequences(X_tr_raw, y_tr_raw, SEQ_LEN)
         X_va_seq, y_va_seq = make_sequences(X_va_raw, y_va_raw, SEQ_LEN)
         X_te_seq, y_te_seq = make_sequences(X_te_raw, y_te_raw, SEQ_LEN)
@@ -516,14 +519,14 @@ def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
 
         print(f"[LSTM] {symbol} fold={fold}: train={len(X_tr_seq)} val={len(X_va_seq)} test={len(X_te_seq)}")
 
-        # Обучение
+        # Training
         model, scaler = train_lstm_one_fold(X_tr_seq, y_tr_seq, X_va_seq, y_va_seq, n_features)
 
-        # Предсказание
+        # Prediction
         val_probs = predict_lstm(model, scaler, X_va_seq, n_features)
         test_probs = predict_lstm(model, scaler, X_te_seq, n_features)
 
-        # Бинаризация при пороге 0.5
+        # Binarise at threshold 0.5
         val_preds = (val_probs >= 0.5).astype(int)
         test_preds = (test_probs >= 0.5).astype(int)
 
@@ -542,20 +545,20 @@ def run_lstm_walk_forward(engine, symbol: str) -> list[RowClf]:
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  Сохранение результатов
+#  Saving results
 # ─────────────────────────────────────────────────────────────────────
 def append_to_metrics_csv(rows: list[RowClf]) -> None:
-    """Добавляет строки LSTM в metrics_walk_direction_k5.csv (как у других моделей)."""
+    """Appends LSTM rows to metrics_walk_direction_k5.csv (like the other models)."""
     if not rows:
-        print("[LSTM] Нет результатов для сохранения")
+        print("[LSTM] No results to save")
         return
 
     new_df = pd.DataFrame([asdict(r) for r in rows])
 
     if OUT_CSV.exists():
         old = pd.read_csv(OUT_CSV)
-        # Удаляем только LSTM строки для ТЕХ символов, что пересчитываем
-        # (чтобы досчёт новых тикеров не стирал старые результаты).
+        # Drop only LSTM rows for the symbols being recomputed
+        # (so adding new tickers does not erase earlier results).
         recomputed_symbols = set(new_df["symbol"].unique())
         mask_drop = (old["model"] == "LSTM") & (old["symbol"].isin(recomputed_symbols))
         old = old[~mask_drop]
@@ -564,8 +567,8 @@ def append_to_metrics_csv(rows: list[RowClf]) -> None:
         combined = new_df
 
     combined.to_csv(OUT_CSV, index=False)
-    print(f"\n[LSTM] Сохранено {len(rows)} строк в {OUT_CSV}")
-    print(f"[LSTM] Общее количество строк в файле: {len(combined)}")
+    print(f"\n[LSTM] Saved {len(rows)} rows to {OUT_CSV}")
+    print(f"[LSTM] Total rows in file: {len(combined)}")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -573,17 +576,17 @@ def append_to_metrics_csv(rows: list[RowClf]) -> None:
 # ─────────────────────────────────────────────────────────────────────
 def main() -> None:
     print("=" * 70)
-    print(" LSTM baseline для direction forecasting")
+    print(" LSTM baseline for direction forecasting")
     print("=" * 70)
-    print(f" Устройство:    {DEVICE}")
+    print(f" Device:        {DEVICE}")
     print(f" PyTorch:       {torch.__version__}")
     print(f" Random seed:   {SEED}")
-    print(f" END_DATE:      {END_DATE} (фиксация для статьи)")
-    print(f" Horizon:       k = {HORIZON_DAYS} дней")
-    print(f" Sequence len:  {SEQ_LEN} дней")
+    print(f" END_DATE:      {END_DATE} (pinned for the paper)")
+    print(f" Horizon:       k = {HORIZON_DAYS} days")
+    print(f" Sequence len:  {SEQ_LEN} days")
     print(f" LSTM hidden:   {LSTM_HIDDEN}, layers: {LSTM_LAYERS}")
     print(f" Epochs (max):  {LSTM_EPOCHS}, patience: {LSTM_PATIENCE}")
-    print(f" Символы:       {SYMBOLS}")
+    print(f" Instruments:   {SYMBOLS}")
     print("=" * 70)
 
     set_seeds(SEED)
@@ -601,12 +604,12 @@ def main() -> None:
 
     append_to_metrics_csv(all_results)
 
-    # Сводка
+    # Summary
     if all_results:
         df = pd.DataFrame([asdict(r) for r in all_results])
         test_df = df[df["split"] == "test"]
         if not test_df.empty:
-            print("\n[LSTM] Сводка по test split:")
+            print("\n[LSTM] Test-split summary:")
             summary = test_df.groupby("symbol").agg(
                 auc_mean=("auc", "mean"),
                 auc_std=("auc", "std"),

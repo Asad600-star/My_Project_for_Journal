@@ -1,24 +1,23 @@
 """
-Sensitivity Analysis: robustness метода к выбору горизонта прогноза K.
+Sensitivity analysis: robustness of the method to the forecast horizon K.
 ========================================================================
 
-Цель для Q1: показать что предложенный подход работает не только на K=5 дней,
-но и на K=10, K=20 (different forecast horizons).
+Repeats the walk-forward evaluation of the machine-learning models of
+train_baseline.py at K = 10 and K = 20 (K = 5 is the main run) and summarises
+the mean test metric per instrument, model and horizon (Table 9 reports the best
+machine-learning volatility RMSE per instrument and horizon). The econometric,
+hybrid and deep models are evaluated at K = 5 only.
 
-Reviewer Q1 всегда спрашивает: "Robust to hyperparameter choices?"
-Этот скрипт даёт чёткий ответ: "Да, на всех K от 5 до 20 ExtraTrees доминирует
-на volatility, а HYBRID модели показывают стабильные результаты на direction".
+A full run takes about 3-5 hours.
 
-ВНИМАНИЕ: запуск занимает ~3-5 часов (по 1-2 часа на каждый K).
-Рекомендуется запускать на ночь.
+Run:
+    python -m jobs.sensitivity_analysis              # train K = 5, 10, 20 and summarise
+    python -m jobs.sensitivity_analysis summarise    # summary from existing metric files
 
-Запуск:
-    python -m jobs.sensitivity_analysis
-
-Результат:
-    artifacts/sensitivity_K_summary.csv  — сводная таблица для статьи
-    artifacts/metrics_walk_direction_k{K}.csv (для каждого K)
-    artifacts/metrics_walk_volatility_k{K}.csv (для каждого K)
+Output:
+    artifacts/sensitivity_K_summary.csv  — summary table for the paper
+    artifacts/metrics_walk_direction_k{K}.csv (per K)
+    artifacts/metrics_walk_volatility_k{K}.csv (per K)
 """
 from __future__ import annotations
 
@@ -33,8 +32,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Горизонты для тестирования robustness
+# Horizons tested for robustness
 HORIZONS = [5, 10, 20]
+ML_MODELS = {"EXTRATREES", "HYBRID_STACK_REG", "XGB", "LGBM", "HGB",
+             "LOGREG", "RF", "HYBRID_VOTING", "HYBRID_STACK"}
 TASKS = ["direction", "volatility"]
 END_DATE = os.environ.get("END_DATE", "2026-06-01")
 
@@ -44,7 +45,7 @@ SUMMARY_OUT = ARTIFACTS_DIR / "sensitivity_K_summary.csv"
 
 
 def run_one_config(horizon: int, task: str) -> int:
-    """Запускает train_baseline.py с заданным K и task."""
+    """Runs train_baseline.py for the given K and task."""
     env = os.environ.copy()
     env["HORIZON_DAYS"] = str(horizon)
     env["TASK"] = task
@@ -61,30 +62,32 @@ def run_one_config(horizon: int, task: str) -> int:
         cwd=str(Path(__file__).resolve().parents[1]),
     )
     dt = time.time() - t0
-    print(f"\n[INFO] K={horizon} task={task} done in {dt/60:.1f} мин")
+    print(f"\n[INFO] K={horizon} task={task} done in {dt/60:.1f} min")
     return proc.returncode
 
 
 def aggregate_results() -> pd.DataFrame:
-    """Собирает итоговую таблицу sensitivity из CSV файлов разных K."""
+    """Aggregates the sensitivity summary table from the per-K CSV files."""
     all_rows = []
 
     for k in HORIZONS:
         for task in TASKS:
             csv = ARTIFACTS_DIR / f"metrics_walk_{task}_k{k}.csv"
             if not csv.exists():
-                print(f"[WARN] Не найден: {csv}")
+                print(f"[WARN] Not found: {csv}")
                 continue
             df = pd.read_csv(csv)
-            df = df[df["split"] == "test"].copy()
+            # only the walk-forward models of train_baseline.py, which are run at every K
+            # (Table 9); econometric, hybrid and deep models exist only for K = 5
+            df = df[(df["split"] == "test") & (df["model"].isin(ML_MODELS))].copy()
             df["K"] = k
 
-            # Для direction: AUC, для volatility: RMSE
+            # direction: AUC, volatility: RMSE
             metric = "auc" if task == "direction" else "rmse"
             if metric not in df.columns:
                 continue
 
-            # Сводка по (symbol, model)
+            # Summary by (symbol, model)
             summary = (
                 df.groupby(["symbol", "model"], as_index=False)
                 .agg(
@@ -99,7 +102,7 @@ def aggregate_results() -> pd.DataFrame:
             all_rows.append(summary)
 
     if not all_rows:
-        print("[WARN] Нет данных для агрегации")
+        print("[WARN] No data to aggregate")
         return pd.DataFrame()
 
     combined = pd.concat(all_rows, ignore_index=True)
@@ -109,7 +112,7 @@ def aggregate_results() -> pd.DataFrame:
 
 
 def make_summary_pivot(df: pd.DataFrame) -> dict:
-    """Создаёт сводные таблицы для статьи: по моделям × K на каждом символе."""
+    """Builds paper pivot tables: models x K for each instrument."""
     pivots = {}
 
     for task in TASKS:
@@ -136,57 +139,57 @@ def make_summary_pivot(df: pd.DataFrame) -> dict:
 
 def main() -> None:
     print("=" * 70)
-    print(" SENSITIVITY ANALYSIS — robustness к горизонту K")
+    print(" SENSITIVITY ANALYSIS — robustness to horizon K")
     print("=" * 70)
     print(f" Horizons:  K = {HORIZONS}")
     print(f" Tasks:     {TASKS}")
     print(f" END_DATE:  {END_DATE}")
-    print(f" Tickers:   будут взяты из features_daily")
+    print(" Tickers:   taken from features_daily")
     print("=" * 70)
-    print(" ПРЕДУПРЕЖДЕНИЕ: запуск займёт ~3-5 часов на M4!")
-    print(" Можно запустить на ночь.")
+    print(" WARNING: a full run takes ~3-5 hours on an M4!")
+    print(" Can be run overnight.")
     print("=" * 70)
 
-    # ─── Этап 1: запуск train_baseline для каждого K и task ───
+    # --- Stage 1: run train_baseline for each K and task (skipped with "summarise") ---
     overall_start = time.time()
-    for k in HORIZONS:
-        # Skip K=5 если файлы уже есть (мы их уже сгенерировали)
+    for k in ([] if "summarise" in sys.argv[1:] else HORIZONS):
+        # Skip K=5 if files already exist (already generated)
         skip_k5 = (
             k == 5
             and (ARTIFACTS_DIR / "metrics_walk_direction_k5.csv").exists()
             and (ARTIFACTS_DIR / "metrics_walk_volatility_k5.csv").exists()
         )
         if skip_k5:
-            print(f"\n[SKIP] K={k}: файлы уже существуют, пропускаем повторный запуск")
+            print(f"\n[SKIP] K={k}: files already exist, skipping re-run")
             continue
 
         for task in TASKS:
             rc = run_one_config(k, task)
             if rc != 0:
-                print(f"[ERROR] K={k} task={task} вернул код {rc}")
+                print(f"[ERROR] K={k} task={task} returned code {rc}")
 
     elapsed_total = time.time() - overall_start
-    print(f"\n[INFO] Все обучения завершены за {elapsed_total/60:.1f} мин")
+    print(f"\n[INFO] All runs finished in {elapsed_total/60:.1f} min")
 
-    # ─── Этап 2: агрегация в одну сводную таблицу ───
+    # --- Stage 2: aggregate into one summary table ---
     print("\n" + "=" * 70)
-    print(" Агрегация результатов")
+    print(" Aggregating results")
     print("=" * 70)
 
     combined = aggregate_results()
     if combined.empty:
-        print("[ERROR] Нет данных для агрегации")
+        print("[ERROR] No data to aggregate")
         return
 
     combined.to_csv(SUMMARY_OUT, index=False)
-    print(f"[ARTIFACT] Сохранено: {SUMMARY_OUT}")
-    print(f"[INFO] Всего строк: {len(combined)}")
+    print(f"[ARTIFACT] Saved: {SUMMARY_OUT}")
+    print(f"[INFO] Total rows: {len(combined)}")
 
-    # ─── Этап 3: pivot tables для статьи ───
+    # --- Stage 3: pivot tables for the paper ---
     pivots = make_summary_pivot(combined)
 
     print("\n" + "=" * 70)
-    print(" PIVOTS для статьи (model × K)")
+    print(" PIVOTS for the paper (model x K)")
     print("=" * 70)
 
     for (task, sym), data in sorted(pivots.items()):
@@ -199,9 +202,9 @@ def main() -> None:
         print(pivot.round(5).to_string())
         print(f"  Best per K: {data['best_per_K'].to_dict()}")
 
-    # ─── Этап 4: сводка стабильности победителя ───
+    # --- Stage 4: winner-stability summary ---
     print("\n" + "=" * 70)
-    print(" Стабильность победителя через K")
+    print(" Winner stability across K")
     print("=" * 70)
 
     stable_winners = []
@@ -219,7 +222,7 @@ def main() -> None:
         })
 
     n_stable = sum(1 for w in stable_winners if w["stable"])
-    print(f"\n[STATS] Стабильных победителей: {n_stable} / {len(stable_winners)}")
+    print(f"\n[STATS] Stable winners: {n_stable} / {len(stable_winners)}")
     for w in stable_winners:
         mark = "✅" if w["stable"] else "⚠️"
         print(f"  {mark} {w['task']:<10} {w['symbol']:<8}: {w['winners_by_K']}")

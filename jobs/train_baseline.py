@@ -13,22 +13,17 @@ from sqlalchemy import create_engine, text
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from sklearn.linear_model import Ridge, ElasticNet, LogisticRegression
+from sklearn.linear_model import Ridge, LogisticRegression
 from sklearn.isotonic import IsotonicRegression
 from sklearn.ensemble import (
     HistGradientBoostingRegressor,
     HistGradientBoostingClassifier,
-    RandomForestRegressor,
     ExtraTreesRegressor,
     RandomForestClassifier,
-    ExtraTreesClassifier,
     VotingClassifier,
     StackingClassifier,
     StackingRegressor,
-    GradientBoostingClassifier,
 )
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.base import BaseEstimator, RegressorMixin, ClassifierMixin
 
 # === НОВЫЕ СИЛЬНЫЕ МОДЕЛИ ===
 from xgboost import XGBClassifier, XGBRegressor
@@ -49,7 +44,6 @@ from core.explain.shap_explainer import compute_and_save_shap
 load_dotenv()
 
 import sys
-from pathlib import Path
 # === ИСПРАВЛЕНИЕ ПУТЕЙ ===
 project_root = str(Path(__file__).resolve().parents[1])
 if project_root not in sys.path:
@@ -87,18 +81,7 @@ if ACTION not in ("train", "infer", "backtest"):
 # Inference/backtest inputs
 METRICS_DIR = Path(os.environ.get("METRICS_DIR", "artifacts"))
 PRED_OUT = Path(os.environ.get("PRED_OUT", "artifacts/predictions_latest.csv"))
-BT_OUT = Path(os.environ.get("BT_OUT", "artifacts/backtest_direction.csv"))
 PRED_OUT.parent.mkdir(parents=True, exist_ok=True)
-BT_OUT.parent.mkdir(parents=True, exist_ok=True)
-
-# Strategy params
-PROB_THRESHOLD = float(os.environ.get("PROB_THRESHOLD", "0.55"))
-if not (0.0 < PROB_THRESHOLD < 1.0):
-    raise ValueError("PROB_THRESHOLD must be in (0,1)")
-
-TRADING_FEE_BPS = float(os.environ.get("TRADING_FEE_BPS", "0.0"))  # per turn, basis points
-if TRADING_FEE_BPS < 0:
-    raise ValueError("TRADING_FEE_BPS must be >= 0")
 
 LOG_TARGET = int(os.environ.get("LOG_TARGET", "0"))  # 1 -> train on log1p(y) when y > -1
 
@@ -169,64 +152,6 @@ def safe_auc(y_true: np.ndarray, y_prob: np.ndarray) -> float:
     if len(np.unique(y_true)) < 2:
         return float("nan")
     return float(roc_auc_score(y_true, y_prob))
-
-def get_classifier_prob(model, X: np.ndarray) -> np.ndarray:
-    """Return positive-class probabilities for any supported classifier."""
-    if hasattr(model, "predict_proba"):
-        p = model.predict_proba(X)[:, 1]
-    else:
-        s = model.decision_function(X)
-        p = 1.0 / (1.0 + np.exp(-s))
-    return np.asarray(p, dtype=float)
-
-def fit_prob_calibrator(y_true: np.ndarray, y_prob: np.ndarray, method: str = "isotonic"):
-    """Fit probability calibrator on validation probabilities.
-
-    method='isotonic' is preferred for flexible monotone calibration.
-    Falls back to logistic calibration when isotonic is not feasible.
-    Returns a tuple: (kind, fitted_object) or None.
-    """
-    y_true = np.asarray(y_true)
-    y_prob = np.asarray(y_prob, dtype=float)
-    mask = np.isfinite(y_true) & np.isfinite(y_prob)
-    y_true = y_true[mask]
-    y_prob = np.clip(y_prob[mask], 1e-6, 1.0 - 1e-6)
-
-    if len(y_true) < 30 or len(np.unique(y_true)) < 2:
-        return None
-
-    if method == "isotonic":
-        try:
-            iso = IsotonicRegression(out_of_bounds="clip")
-            iso.fit(y_prob, y_true)
-            return ("isotonic", iso)
-        except Exception:
-            pass
-
-    x = np.log(y_prob / (1.0 - y_prob)).reshape(-1, 1)
-    lr = LogisticRegression(max_iter=2000, random_state=RANDOM_STATE)
-    lr.fit(x, y_true)
-    return ("logistic", lr)
-
-def apply_prob_calibrator(calibrator, y_prob: np.ndarray) -> np.ndarray:
-    """Apply fitted calibrator to probabilities."""
-    y_prob = np.asarray(y_prob, dtype=float)
-    y_prob = np.clip(y_prob, 1e-6, 1.0 - 1e-6)
-
-    if calibrator is None:
-        return y_prob
-
-    kind, obj = calibrator
-    if kind == "isotonic":
-        out = obj.predict(y_prob)
-    elif kind == "logistic":
-        x = np.log(y_prob / (1.0 - y_prob)).reshape(-1, 1)
-        out = obj.predict_proba(x)[:, 1]
-    else:
-        out = y_prob
-
-    return np.clip(np.asarray(out, dtype=float), 1e-6, 1.0 - 1e-6)
-
 
 def _ema(s: pd.Series, span: int) -> pd.Series:
     return s.ewm(span=span, adjust=False, min_periods=span).mean()
@@ -477,7 +402,7 @@ def save_model_registry(task: str, horizon_days: int, best_df: pd.DataFrame) -> 
     reg = best_df.copy()
     reg.insert(0, "task", task)
     reg["horizon_days"] = int(horizon_days)
-    reg["saved_at_utc"] = pd.Timestamp.utcnow().isoformat()
+    reg["saved_at_utc"] = pd.Timestamp.now("UTC").isoformat()
 
     if task == "direction":
         metric_name = "auc_mean"
@@ -526,6 +451,7 @@ def get_model_by_name(task: str, name: str):
 
 
 MODELS_DIR = Path(os.environ.get("MODELS_DIR", "artifacts/models"))
+LIVE_CALIB_DAYS = int(os.environ.get("LIVE_CALIB_DAYS", "252"))   # calibration block of the live model
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -552,7 +478,7 @@ def _load_or_train_model(sym: str, task: str, name: str, X_train: np.ndarray, y_
     model.fit(X_train, y_train)
     try:
         joblib.dump({"model": model, "n_train_rows": len(X_train),
-                     "saved_at": pd.Timestamp.utcnow().isoformat()}, path)
+                     "saved_at": pd.Timestamp.now("UTC").isoformat()}, path)
         print(f"[CACHE] Модель сохранена: {path}")
     except Exception as e:
         print(f"[WARN] Не удалось сохранить модель {path}: {e}")
@@ -591,66 +517,81 @@ def infer_latest_for_symbol(df: pd.DataFrame, sym: str, best_dir: str, best_vol:
     X_latest = latest[feature_cols].values
     feature_names = feature_cols
 
-    # === Direction ===
+    # === Direction: model fitted on all labelled rows except the most recent
+    # LIVE_CALIB_DAYS (purged by k rows), which are used for the isotonic PAV
+    # calibration of its probability (Lemma 1) ===
     y_dir = labeled["target_direction"].values
-    dir_model = _load_or_train_model(sym, "direction", best_dir, X_train, y_dir, force_retrain)
+    n_lab = len(labeled)
+    n_fit = n_lab - LIVE_CALIB_DAYS - HORIZON_DAYS
+    if n_fit < 200:
+        print(f"[WARN] {sym}: too few labelled rows for a calibrated forecast ({n_lab})")
+        return None
+    dir_model = _load_or_train_model(sym, "direction", best_dir, X_train[:n_fit], y_dir[:n_fit], force_retrain)
+    p_cal_block = dir_model.predict_proba(X_train[n_lab - LIVE_CALIB_DAYS:])[:, 1]
+    iso = IsotonicRegression(out_of_bounds="clip", y_min=0.0, y_max=1.0).fit(
+        p_cal_block, y_dir[n_lab - LIVE_CALIB_DAYS:])
+    p_up_raw = float(dir_model.predict_proba(X_latest)[:, 1][0])
+    p_up = float(iso.predict([p_up_raw])[0])
 
-    if hasattr(dir_model, "predict_proba"):
-        p_up_raw = float(dir_model.predict_proba(X_latest)[:, 1][0])
-    else:
-        s = float(dir_model.decision_function(X_latest)[0])
-        p_up_raw = float(1.0 / (1.0 + np.exp(-s)))
-
-    # === AUC<0.5 fallback ===
-    # Читаем зарегистрированный AUC и если <0.5 — используем константный baseline (доля положительных в train).
-    p_up = p_up_raw
-    auc_reg = _get_registered_auc(sym, HORIZON_DAYS)
+    # === No-skill fallback: if the model has no walk-forward skill on this
+    # instrument (mean test AUC < 0.5), report the base rate instead ===
+    auc_reg = _walkforward_auc(sym, best_dir)
     if auc_reg is not None and auc_reg < 0.50:
         baseline_p = float(np.mean(y_dir == 1))
-        print(f"[FALLBACK] {sym}: registry AUC={auc_reg:.3f} < 0.50 — использую BASELINE_CONST p={baseline_p:.3f} вместо {best_dir}")
+        print(f"[FALLBACK] {sym}: walk-forward AUC={auc_reg:.3f} < 0.50, reporting the base rate {baseline_p:.3f}")
         p_up = baseline_p
 
     try:
-        compute_and_save_shap(dir_model, X_latest, feature_names, f"{sym}_direction")
+        # the training rows are the background of the linear member (LinearExplainer);
+        # with the explained row as its own background its attribution would be zero
+        compute_and_save_shap(dir_model, X_latest, feature_names, f"{sym}_direction",
+                              X_background=X_train[:n_fit])
     except Exception as e:
         print(f"[WARN] SHAP direction для {sym} не посчитан: {e}")
 
     # === Volatility ===
+    # The reported forecast is H-ECON-ET (Section 4.4); the machine-learning
+    # regressor is still fitted because its SHAP values explain the forecast.
     y_vol = labeled["target_vol_kd"].values
     vol_model = _load_or_train_model(sym, "volatility", best_vol, X_train, y_vol, force_retrain)
-    vol_pred = float(vol_model.predict(X_latest)[0])
-    vol_pred = max(0.0, vol_pred)  # волатильность не может быть отрицательной
+    vol_pred_ml = max(0.0, float(vol_model.predict(X_latest)[0]))
+    try:
+        from jobs.volatility_models import hybrid_forecast
+        upto = df2[df2["date"] <= latest_date].reset_index(drop=True)
+        vol_pred = max(0.0, hybrid_forecast(upto, feature_cols, base="ECON", k=HORIZON_DAYS))
+        vol_name = "HYBRID_ECON_ET"
+    except Exception as e:
+        print(f"[WARN] {sym}: H-ECON-ET failed ({e}); using {best_vol}")
+        vol_pred, vol_name = vol_pred_ml, str(best_vol)
 
     try:
-        compute_and_save_shap(vol_model, X_latest, feature_names, f"{sym}_volatility")
+        compute_and_save_shap(vol_model, X_latest, feature_names, f"{sym}_volatility",
+                              X_background=X_train)
     except Exception as e:
         print(f"[WARN] SHAP volatility для {sym} не посчитан: {e}")
 
     return {
         "symbol": sym,
-        "asof_date": str(latest_date.date()),
+        "asof_date": str(pd.to_datetime(latest["date"].iloc[0]).date()),   # date of the features used
         "horizon_days": int(HORIZON_DAYS),
         "direction_model": str(best_dir),
         "p_up": p_up,
         "p_up_raw": p_up_raw,
         "auc_registered": auc_reg if auc_reg is not None else float("nan"),
-        "volatility_model": str(best_vol),
+        "volatility_model": vol_name,
         "vol_pred": vol_pred,
+        "vol_pred_ml": vol_pred_ml,
     }
 
 
-def _get_registered_auc(symbol: str, horizon_days: int) -> float | None:
-    """Читает AUC лучшей direction-модели из реестра."""
-    reg = _read_registry_safe(horizon_days)
-    if reg.empty or not {"task", "symbol", "metric_value"}.issubset(reg.columns):
+def _walkforward_auc(symbol: str, model: str) -> float | None:
+    """Mean walk-forward test AUC of a direction model on one instrument."""
+    p = METRICS_DIR / f"metrics_walk_direction_k{HORIZON_DAYS}.csv"
+    if not p.exists():
         return None
-    part = reg[(reg["task"] == "direction") & (reg["symbol"] == symbol)]
-    if part.empty:
-        return None
-    try:
-        return float(part["metric_value"].iloc[-1])
-    except Exception:
-        return None
+    d = pd.read_csv(p)
+    d = d[(d["split"] == "test") & (d["symbol"] == symbol) & (d["model"] == model)]
+    return float(d["auc"].mean()) if len(d) else None
 
 
 def run_infer(engine) -> None:
@@ -717,8 +658,20 @@ def run_infer(engine) -> None:
         df = add_technical_features(df)
         df = df.replace([np.inf, -np.inf], np.nan)
 
-        best_dir = selected.get("direction", {}).get(sym, default_dir)
+        # One direction model for every instrument (the system model of the paper);
+        # LIVE_DIR_MODEL=registry restores the per-instrument choice of the registry.
+        live_dir = os.environ.get("LIVE_DIR_MODEL", "HYBRID_VOTING")
+        best_dir = selected.get("direction", {}).get(sym, default_dir) if live_dir == "registry" else live_dir
         best_vol = selected.get("volatility", {}).get(sym, default_vol)
+        try:
+            get_model_by_name("direction", best_dir)
+        except ValueError:
+            print(f"[WARN] {sym}: model {best_dir} is not available for inference, using {default_dir}")
+            best_dir = default_dir
+        try:
+            get_model_by_name("volatility", best_vol)
+        except ValueError:
+            best_vol = default_vol
 
         r = infer_latest_for_symbol(df, sym, best_dir, best_vol, engine=engine)
         if r is not None:
@@ -728,7 +681,7 @@ def run_infer(engine) -> None:
         raise RuntimeError("Inference produced no rows. Check data / symbols.")
 
     out_df = pd.DataFrame(rows).sort_values(["symbol"]).reset_index(drop=True)
-    out_df["generated_at_utc"] = pd.Timestamp.utcnow().isoformat()
+    out_df["generated_at_utc"] = pd.Timestamp.now("UTC").isoformat()
 
     if only_symbol and PRED_OUT.exists():
         try:
@@ -749,182 +702,12 @@ def run_infer(engine) -> None:
     print(f"\n[ARTIFACT] Saved predictions to: {PRED_OUT}")
 
 
-def _max_drawdown(equity: np.ndarray) -> float:
-    equity = np.asarray(equity, dtype=float)
-    peak = np.maximum.accumulate(equity)
-    dd = (equity / np.where(peak == 0, np.nan, peak)) - 1.0
-    return float(np.nanmin(dd))
-
-
 def run_backtest(engine) -> None:
-    """Simple long/cash strategy driven by direction probabilities.
-
-    Signal at t uses features at t to predict direction over HORIZON_DAYS.
-    We apply position for next-day return (1-day holding), which is a standard
-    proxy for trading feasibility.
-    """
-    print(f"[INFO] ACTION=backtest HORIZON_DAYS={HORIZON_DAYS} PROB_THRESHOLD={PROB_THRESHOLD}")
-
-    selected = select_best_models(HORIZON_DAYS)
-    default_dir = os.environ.get("DEFAULT_DIR_MODEL", "LOGREG")
-
-    print(f"[INFO] Backtest selected direction models: {selected.get('direction', {})}")
-
-    only_symbol = os.environ.get("ONLY_SYMBOL")
-    only_symbol = only_symbol.strip() if only_symbol else None
-
-    if only_symbol:
-        symbols = [only_symbol]
-    else:
-        symbols = pd.read_sql_query(
-            """
-            SELECT DISTINCT symbol
-            FROM features_daily
-            WHERE symbol NOT IN ('^VIX','^IRX','^TNX')
-            ORDER BY symbol
-            """,
-            con=engine,
-        )["symbol"].tolist()
-
-    bt_rows = []
-    summary_rows = []
-
-    fee = TRADING_FEE_BPS / 10000.0
-
-    for sym in symbols:
-        df = pd.read_sql_query(
-            text(
-                """
-                SELECT symbol, date,
-                       open, high, low, close, volume,
-                       return_1d, log_return,
-                       sma_5, volatility_5,
-                       sma_10, volatility_10,
-                       sma_20, volatility_20,
-                       return_lag_1, return_lag_2, return_lag_3, return_lag_4, return_lag_5,
-                       mkt_return_1d, mkt_log_return, mkt_mom_5, mkt_mom_10, mkt_mom_20, mkt_vol_20,
-                       vix_level, vix_return_1d, vix_change_1d,
-                       irx_level, irx_change_1d,
-                       tnx_level, tnx_change_1d
-                FROM features_daily
-                WHERE symbol = :symbol
-                ORDER BY date
-                """
-            ),
-            con=engine,
-            params={"symbol": sym},
-            parse_dates=["date"],
-        )
-        if df.empty:
-            continue
-
-        required_core = ["date", "open", "high", "low", "close", "volume", "return_1d", "log_return"]
-        df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.dropna(subset=required_core).reset_index(drop=True)
-        if df.empty:
-            continue
-
-        df = add_technical_features(df)
-        df = df.replace([np.inf, -np.inf], np.nan)
-
-        df2, feature_cols = build_feature_matrix(df)
-        if df2.empty or not feature_cols:
-            continue
-
-        labeled = compute_targets(df2.copy(), HORIZON_DAYS)
-        if labeled.empty:
-            continue
-
-        # Use walk-forward style: expanding fit each day is expensive.
-        # We do a single fit on the first 70% of labeled data and test on the remaining 30%.
-        n = len(labeled)
-        split = int(n * 0.7)
-        tr = labeled.iloc[:split].copy()
-        te = labeled.iloc[split:].copy()
-
-        X_tr = tr[feature_cols].values
-        y_tr = tr["target_direction"].values
-
-        model_name = selected.get("direction", {}).get(sym, default_dir)
-        model, _ = get_model_by_name("direction", model_name)
-        model.fit(X_tr, y_tr)
-
-        X_te = te[feature_cols].values
-        if hasattr(model, "predict_proba"):
-            p = model.predict_proba(X_te)[:, 1]
-        else:
-            s = model.decision_function(X_te)
-            p = 1.0 / (1.0 + np.exp(-s))
-
-        # Position for next-day return
-        pos = (p >= PROB_THRESHOLD).astype(int)
-        # next-day simple return aligned to current row: use te['return_1d'].shift(-1)
-        r_next = te["return_1d"].shift(-1).values
-
-        # Remove last row (no next-day return)
-        pos = pos[:-1]
-        p = p[:-1]
-        dates = te["date"].iloc[:-1].apply(to_pydate).astype(str).values
-        r_next = r_next[:-1]
-
-        # Transaction cost on position changes
-        pos_prev = np.concatenate([[0], pos[:-1]])
-        turnover = np.abs(pos - pos_prev)
-        strat_ret = pos * r_next - turnover * fee
-
-        equity = np.cumprod(1.0 + np.nan_to_num(strat_ret, nan=0.0))
-
-        # Metrics
-        daily = np.nan_to_num(strat_ret, nan=0.0)
-        mu = float(np.mean(daily))
-        sig = float(np.std(daily, ddof=0))
-        sharpe = float((mu / sig) * np.sqrt(252.0)) if sig > 0 else float("nan")
-        mdd = _max_drawdown(equity)
-        total_return = float(equity[-1] - 1.0) if len(equity) else float("nan")
-
-        summary_rows.append(
-            {
-                "symbol": sym,
-                "model": model_name,
-                "threshold": PROB_THRESHOLD,
-                "fee_bps": TRADING_FEE_BPS,
-                "n_days": int(len(daily)),
-                "total_return": total_return,
-                "sharpe": sharpe,
-                "max_drawdown": mdd,
-                "avg_pos": float(np.mean(pos)) if len(pos) else float("nan"),
-            }
-        )
-
-        for i in range(len(daily)):
-            bt_rows.append(
-                {
-                    "symbol": sym,
-                    "date": dates[i],
-                    "p_up": float(p[i]),
-                    "pos": int(pos[i]),
-                    "ret_next": float(r_next[i]) if np.isfinite(r_next[i]) else float("nan"),
-                    "strat_ret": float(daily[i]),
-                }
-            )
-
-    if not bt_rows:
-        raise RuntimeError("Backtest produced no rows. Check data / symbols.")
-
-    bt_df = pd.DataFrame(bt_rows)
-    sm_df = pd.DataFrame(summary_rows).sort_values(["symbol"]).reset_index(drop=True)
-
-    # Save both: summary and detailed trades
-    sm_path = BT_OUT
-    trades_path = BT_OUT.with_name(BT_OUT.stem + "_trades.csv")
-
-    sm_df.to_csv(sm_path, index=False)
-    bt_df.to_csv(trades_path, index=False)
-
-    print("\n[BACKTEST] Summary:")
-    print(sm_df.to_string(index=False))
-    print(f"\n[ARTIFACT] Saved backtest summary to: {sm_path}")
-    print(f"[ARTIFACT] Saved backtest trades to: {trades_path}")
+    """ACTION=backtest runs the economic back-test of the paper (jobs/backtest.py, Table 11):
+    walk-forward refits every 21 days, PAV calibration on the most recent 252 labelled days,
+    the position sizes of the risk module and 5 bps per side."""
+    from jobs.backtest import main as backtest_main
+    backtest_main()
 
 
 def print_reg(name: str, y_true: np.ndarray, y_pred: np.ndarray) -> dict:
@@ -1096,82 +879,13 @@ def clip_targets(y: np.ndarray, pct: float) -> tuple[np.ndarray, str]:
     return y2, f"y_clip={pct:.3g}[{lo:.4g},{hi:.4g}]"
 
 
-class HybridRidgeHGBRegressor(BaseEstimator, RegressorMixin):
-    """Two-stage hybrid: Ridge captures linear structure, HGB fits residuals."""
-
-    def __init__(self, ridge_alpha: float = 5.0):
-        self.ridge_alpha = ridge_alpha
-        self.ridge_ = Pipeline(
-            [("scaler", StandardScaler()), ("model", Ridge(alpha=ridge_alpha))]
-        )
-        self.hgb_ = HistGradientBoostingRegressor(
-            max_depth=3,
-            learning_rate=0.03,
-            max_iter=2000,
-            l2_regularization=1.0,
-            min_samples_leaf=30,
-            random_state=RANDOM_STATE,
-        )
-
-    def fit(self, X, y):
-        self.ridge_.fit(X, y)
-        resid = y - self.ridge_.predict(X)
-        self.hgb_.fit(X, resid)
-        return self
-
-    def predict(self, X):
-        return self.ridge_.predict(X) + self.hgb_.predict(X)
-
-
-class SoftVoteLogregHGBClassifier(BaseEstimator, ClassifierMixin):
-    """Soft-voting hybrid: average probabilities of LogReg and HGB."""
-
-    def __init__(self, logreg_C: float = 0.5):
-        self.logreg_C = logreg_C
-        self.logreg_ = Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "model",
-                    LogisticRegression(
-                        max_iter=5000,
-                        C=logreg_C,
-                        class_weight="balanced",
-                        random_state=RANDOM_STATE,
-                    ),
-                ),
-            ]
-        )
-        self.hgb_ = HistGradientBoostingClassifier(
-            max_depth=3,
-            learning_rate=0.03,
-            max_iter=2000,
-            l2_regularization=1.0,
-            min_samples_leaf=30,
-            random_state=RANDOM_STATE,
-        )
-
-    def fit(self, X, y):
-        self.logreg_.fit(X, y)
-        self.hgb_.fit(X, y)
-        return self
-
-    def predict_proba(self, X):
-        p1 = self.logreg_.predict_proba(X)
-        p2 = self.hgb_.predict_proba(X)
-        return 0.5 * p1 + 0.5 * p2
-
-    def predict(self, X):
-        return (self.predict_proba(X)[:, 1] >= 0.5).astype(int)
-
-
 def make_models(task: str):
     """Улучшенный гибридный ensemble.
 
     Direction:
       LOGREG (с масштабированием), HGB (sklearn), XGB, LGBM, RF,
       HYBRID_VOTING (soft-vote с весами по силе модели),
-      HYBRID_STACK (Stacking с мета-моделью LogReg на TimeSeriesSplit).
+      HYBRID_STACK (Stacking с мета-моделью LogReg, StratifiedKFold(5) внутри train).
 
     Volatility:
       EXTRATREES, XGB, LGBM, HGB,
@@ -1447,7 +1161,7 @@ def run_single(df: pd.DataFrame, sym: str) -> tuple[list[RowReg], list[RowClf]]:
         # Optional log-target training (scores always computed on original scale)
         use_log = bool(LOG_TARGET) and (float(np.min(y_train_fit)) > -0.999999)
         if bool(LOG_TARGET) and not use_log:
-            print(f"[WARN] LOG_TARGET=1 but y_train has values <= -1; skipping log1p transform")
+            print("[WARN] LOG_TARGET=1 but y_train has values <= -1; skipping log1p transform")
 
         y_fit = np.log1p(y_train_fit) if use_log else y_train_fit
 
@@ -1666,7 +1380,7 @@ def run_walk(df: pd.DataFrame, sym: str) -> tuple[list[RowReg], list[RowClf]]:
             # Optional log-target training (scores always computed on original scale)
             use_log = bool(LOG_TARGET) and (float(np.min(y_train_fit)) > -0.999999)
             if bool(LOG_TARGET) and not use_log:
-                print(f"[WARN] LOG_TARGET=1 but y_train has values <= -1; skipping log1p transform")
+                print("[WARN] LOG_TARGET=1 but y_train has values <= -1; skipping log1p transform")
 
             y_fit = np.log1p(y_train_fit) if use_log else y_train_fit
 
@@ -1788,12 +1502,12 @@ def main() -> None:
             params={
                 "symbol": sym,
                 "start_date": TRAIN_START_DATE,
-                "end_date": os.environ.get("END_DATE", "2099-12-31"),
+                "end_date": os.environ.get("END_DATE", "2026-06-01"),
             },
             parse_dates=["date"],
         )
 
-        _end_date_env = os.environ.get("END_DATE", "2099-12-31")
+        _end_date_env = os.environ.get("END_DATE", "2026-06-01")
         print(f"[INFO] {sym}: данные с {TRAIN_START_DATE} по {_end_date_env} → {len(df)} строк")
         if df.empty:
             print(f"[WARN] {sym}: empty, skip")
@@ -1834,9 +1548,10 @@ def main() -> None:
         if not all_reg:
             raise RuntimeError("No results produced. Check data size/splits.")
         out_df = pd.DataFrame([asdict(r) for r in all_reg])
-        # Сохраняем результаты внешних baselines (ARIMA, GARCH, LSTM и т.д.)
+        # Сохраняем результаты внешних baselines (deep, GARCH, HAR, HYBRID_GARCH_ET)
         # из существующего файла, чтобы они не перезаписались.
-        EXTERNAL_MODELS = {"LSTM", "ARIMA", "GARCH", "GARCH_X"}
+        EXTERNAL_MODELS = {"LSTM", "GRU", "TRANSFORMER", "NBEATSX", "GARCH", "HAR", "HYBRID_GARCH_ET",
+                           "GJR_GARCH", "HAR_RG", "ECON", "HYBRID_ECON_ET"}
         if OUT_PATH.exists():
             try:
                 prev = pd.read_csv(OUT_PATH)
@@ -1888,9 +1603,10 @@ def main() -> None:
         if not all_clf:
             raise RuntimeError("No results produced. Check data size/splits.")
         out_df = pd.DataFrame([asdict(r) for r in all_clf])
-        # Сохраняем результаты внешних baselines (LSTM, ARIMA, GARCH и т.д.)
+        # Сохраняем результаты внешних baselines (deep, GARCH, HAR, HYBRID_GARCH_ET)
         # из существующего файла, чтобы они не перезаписались.
-        EXTERNAL_MODELS = {"LSTM", "ARIMA", "GARCH", "GARCH_X"}
+        EXTERNAL_MODELS = {"LSTM", "GRU", "TRANSFORMER", "NBEATSX", "GARCH", "HAR", "HYBRID_GARCH_ET",
+                           "GJR_GARCH", "HAR_RG", "ECON", "HYBRID_ECON_ET"}
         if OUT_PATH.exists():
             try:
                 prev = pd.read_csv(OUT_PATH)
