@@ -106,6 +106,11 @@ streamlit run apps/web/main.py       # dashboard at http://localhost:8501
 python -m jobs.bot                   # Telegram bot (set TELEGRAM_BOT_TOKEN in .env)
 ```
 
+The dashboard and the bot show the calibrated up-probability within [5%, 95%]
+("≥ 95%" or "≤ 5%" at the bounds): an isotonic block of a few calibration days
+can reach exactly 0 or 1. All decision thresholds lie inside these bounds, so no
+recommendation or position size changes.
+
 A step-by-step guide in Russian is in `GUIDE_RU.md`.
 
 ## Repository layout
