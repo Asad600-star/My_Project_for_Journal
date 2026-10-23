@@ -31,6 +31,12 @@ artifacts/predictions_latest*.csv
 # Claude worktrees (рабочие ветки)
 .claude/
 
-# Приватные данные пользователей бота (не коммитить)
+# Outputs of reproduce_results.sh and the tests
+figures/
+ci-requirements.txt
+.pytest_cache/
+
+# Personal data of the Telegram bot users (never publish)
 users.json
+users.json.tmp
 subscribers.json

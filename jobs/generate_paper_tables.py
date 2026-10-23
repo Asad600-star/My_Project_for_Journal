@@ -1,29 +1,32 @@
 """
-Генератор всех таблиц для Q1 статьи из собранных метрик.
+OBSOLETE - superseded by the scripts listed in README.md (one per table); kept for the record.
+It compares against the ARIMA rows of the earlier, unfair econometric baseline,
+which are no longer produced, so its output does not correspond to the paper.
+
+Generates all paper tables from the collected metrics.
 ==========================================================
 
-Читает CSV из artifacts/ и формирует готовые таблицы для вставки в статью:
-- Table B1: Direction baseline comparison (AUC, 8 активов)
-- Table B2: Volatility baseline comparison (RMSE, 8 активов)
-- Table B3: Diebold-Mariano значимость (сводка)
-- Table B4: Sensitivity по горизонту K=5/10/20
-- Table B5: Ablation study (вклад групп признаков)
+Reads the CSV files in artifacts/ and builds ready-to-insert paper tables:
+- Table B1: Direction baseline comparison (AUC, 8 instruments)
+- Table B2: Volatility baseline comparison (RMSE, 8 instruments)
+- Table B3: Diebold-Mariano significance (summary)
+- Table B4: Sensitivity across horizon K=5/10/20
+- Table B5: Ablation study (feature-group contribution)
 
-Запуск:
+Run:
     python -m jobs.generate_paper_tables
 
-Все числа — точные из реальных walk-forward экспериментов.
+All numbers are exact, from the real walk-forward experiments.
 """
 from __future__ import annotations
 
 from pathlib import Path
 import pandas as pd
-import numpy as np
 
 A = Path("artifacts")
 OUT = A / "paper_tables.txt"
 
-# 8 целевых активов (макро ^VIX/^IRX/^TNX исключены — они признаки, не цели)
+# 8 target instruments (macro ^VIX/^IRX/^TNX excluded: they are features, not targets)
 TARGET = ["AAPL", "TSLA", "MSFT", "GLD", "^GSPC", "^IXIC", "^DJI", "^RUT"]
 ASSET_LABEL = {
     "AAPL": "AAPL (Apple)",
@@ -73,7 +76,7 @@ def table_direction():
                 row += f"{sub['auc_mean'].iloc[0]:>10.4f}±{sub['auc_std'].iloc[0]:.3f}"
         w(row)
 
-    # Среднее
+    # Mean
     w("-" * len(header))
     row = f"{'MEAN':<16}"
     for m in models:
@@ -81,8 +84,8 @@ def table_direction():
         row += f"{vals.mean():>16.4f}" if len(vals) else f"{'—':>16}"
     w(row)
     w("")
-    # Лучшая модель на каждом активе
-    w("Лучшая модель по активу:")
+    # Best model per instrument
+    w("Best model per instrument:")
     for sym in TARGET:
         sub = agg[agg["symbol"] == sym].sort_values("auc_mean", ascending=False)
         if not sub.empty:
@@ -123,51 +126,51 @@ def table_volatility():
         row += f"{vals.mean():>14.6f}" if len(vals) else f"{'—':>14}"
     w(row)
     w("")
-    # ExtraTrees vs эконометрика
+    # ExtraTrees vs econometrics
     et = agg[agg["model"] == "EXTRATREES"]["rmse_mean"].mean()
     arima = agg[agg["model"] == "ARIMA"]["rmse_mean"].mean()
     garch = agg[agg["model"] == "GARCH"]["rmse_mean"].mean()
-    w(f"ExtraTrees средний RMSE:  {et:.6f}")
-    w(f"ARIMA средний RMSE:       {arima:.6f}  (ExtraTrees лучше на {100*(arima-et)/arima:.1f}%)")
-    w(f"GARCH средний RMSE:       {garch:.6f}  (ExtraTrees лучше на {100*(garch-et)/garch:.1f}%)")
+    w(f"ExtraTrees mean RMSE:  {et:.6f}")
+    w(f"ARIMA mean RMSE:       {arima:.6f}  (ExtraTrees better by {100*(arima-et)/arima:.1f}%)")
+    w(f"GARCH mean RMSE:       {garch:.6f}  (ExtraTrees better by {100*(garch-et)/garch:.1f}%)")
     w("")
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  TABLE B3 — Diebold-Mariano сводка
+#  TABLE B3 — Diebold-Mariano summary
 # ─────────────────────────────────────────────────────────────────────
 def table_dm():
     w("=" * 90)
-    w(" TABLE B3 — DIEBOLD-MARIANO TEST (HLN-corrected): сводка значимости")
+    w(" TABLE B3 — DIEBOLD-MARIANO TEST (HLN-corrected): significance summary")
     w("=" * 90)
     if not (A / "dm_test_results.csv").exists():
-        w("  (файл dm_test_results.csv не найден)")
+        w("  (dm_test_results.csv not found)")
         return
     dm = pd.read_csv(A / "dm_test_results.csv")
-    w(f"\nВсего сравнений: {len(dm)}")
-    w(f"Значимых (p<0.05): {sum(dm['p_value'] < 0.05)}")
-    w(f"Очень значимых (p<0.01): {sum(dm['p_value'] < 0.01)}")
+    w(f"\nTotal comparisons: {len(dm)}")
+    w(f"Significant (p<0.05): {sum(dm['p_value'] < 0.05)}")
+    w(f"Highly significant (p<0.01): {sum(dm['p_value'] < 0.01)}")
     w("")
-    w("По задачам:")
+    w("By task:")
     for task in dm["task"].unique():
         sub = dm[dm["task"] == task]
         sig = sum(sub["p_value"] < 0.05)
-        w(f"  {task:<12}: {sig}/{len(sub)} значимых (p<0.05)")
+        w(f"  {task:<12}: {sig}/{len(sub)} significant (p<0.05)")
     w("")
-    # ExtraTrees vs ARIMA/GARCH — ключевой результат
-    w("Ключевые сравнения (ExtraTrees против эконометрики):")
+    # ExtraTrees vs ARIMA/GARCH — key result
+    w("Key comparisons (ExtraTrees vs econometrics):")
     key = dm[(dm["model_A"] == "EXTRATREES") & (dm["model_B"].isin(["ARIMA", "GARCH"]))]
     sig_key = sum(key["p_value"] < 0.05)
-    w(f"  ExtraTrees vs ARIMA/GARCH: {sig_key}/{len(key)} значимых (p<0.05)")
+    w(f"  ExtraTrees vs ARIMA/GARCH: {sig_key}/{len(key)} significant (p<0.05)")
     w("")
 
 
 # ─────────────────────────────────────────────────────────────────────
-#  TABLE B4 — Sensitivity по горизонту
+#  TABLE B4 — Sensitivity across horizon
 # ─────────────────────────────────────────────────────────────────────
 def table_sensitivity():
     w("=" * 90)
-    w(" TABLE B4 — SENSITIVITY: лучшая volatility-модель RMSE по горизонту K")
+    w(" TABLE B4 — SENSITIVITY: best volatility-model RMSE across horizon K")
     w("=" * 90)
     rows = []
     for k in [5, 10, 20]:
@@ -184,22 +187,22 @@ def table_sensitivity():
             best = sub.groupby("model")["rmse"].mean().sort_values()
             rows.append({"K": k, "symbol": sym, "best_model": best.index[0], "best_rmse": best.iloc[0]})
     if not rows:
-        w("  (нет данных sensitivity)")
+        w("  (no sensitivity data)")
         return
     df = pd.DataFrame(rows)
     w("")
-    # Pivot: symbol × K с RMSE лучшей модели
+    # Pivot: symbol x K with the best-model RMSE
     piv = df.pivot(index="symbol", columns="K", values="best_rmse")
     piv = piv.reindex([s for s in TARGET if s in piv.index])
-    w("Лучший RMSE по (актив × горизонт K):")
+    w("Best RMSE by (instrument x horizon K):")
     w(piv.round(6).to_string())
     w("")
-    # ExtraTrees стабильность
+    # ExtraTrees stability
     et_wins = df[df["best_model"] == "EXTRATREES"].groupby("K").size()
-    w("Сколько активов ExtraTrees побеждает на каждом K:")
+    w("Number of instruments where ExtraTrees wins at each K:")
     for k in [5, 10, 20]:
         if k in et_wins.index:
-            w(f"  K={k}: {et_wins[k]}/8 активов")
+            w(f"  K={k}: {et_wins[k]}/8 instruments")
     w("")
 
 
@@ -208,20 +211,20 @@ def table_sensitivity():
 # ─────────────────────────────────────────────────────────────────────
 def table_ablation():
     w("=" * 90)
-    w(" TABLE B5 — ABLATION STUDY: RMSE по группам признаков (volatility, ExtraTrees)")
+    w(" TABLE B5 — ABLATION STUDY: RMSE by feature group (volatility, ExtraTrees)")
     w("=" * 90)
     f = A / "ablation_pivot.csv"
     if not f.exists():
-        w("  (нет ablation_pivot.csv)")
+        w("  (no ablation_pivot.csv)")
         return
     piv = pd.read_csv(f, index_col=0)
     piv = piv[piv.index.isin(TARGET)]
     w("")
     w(piv.round(6).to_string())
     w("")
-    # Улучшение PRICE_ONLY → ALL_FULL
+    # Improvement PRICE_ONLY -> ALL_FULL
     if "PRICE_ONLY" in piv.columns and "ALL_FULL" in piv.columns:
-        w("Улучшение от PRICE_ONLY (5 призн.) до ALL_FULL (56 призн.):")
+        w("Improvement from PRICE_ONLY (5 feat.) to ALL_FULL (56 feat.):")
         for sym in piv.index:
             p0 = piv.loc[sym, "PRICE_ONLY"]
             pf = piv.loc[sym, "ALL_FULL"]
@@ -234,8 +237,8 @@ def table_ablation():
 def main():
     w("\n")
     w("#" * 90)
-    w("#  ТАБЛИЦЫ ДЛЯ Q1 СТАТЬИ — сгенерированы из реальных walk-forward экспериментов")
-    w("#  8 активов | K=5/10/20 | walk-forward CV | bootstrap CI | Diebold-Mariano")
+    w("#  PAPER TABLES — generated from the real walk-forward experiments")
+    w("#  8 instruments | K=5/10/20 | walk-forward CV | bootstrap CI | Diebold-Mariano")
     w("#" * 90)
     w("")
     table_direction()
@@ -245,7 +248,7 @@ def main():
     table_ablation()
 
     OUT.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n[ARTIFACT] Все таблицы сохранены в {OUT}")
+    print(f"\n[ARTIFACT] All tables saved to {OUT}")
 
 
 if __name__ == "__main__":

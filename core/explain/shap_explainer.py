@@ -4,16 +4,16 @@ import pandas as pd
 import json
 from pathlib import Path
 from sklearn.pipeline import Pipeline
-from sklearn.ensemble import VotingClassifier, StackingClassifier
+from sklearn.ensemble import VotingClassifier, StackingClassifier, StackingRegressor, VotingRegressor
 
 ARTIFACTS = Path("artifacts")
 ARTIFACTS.mkdir(exist_ok=True)
 
 
 def _transform_X_through_pipeline(pipe: Pipeline, X: np.ndarray) -> tuple[np.ndarray, object]:
-    """Применяем все шаги пайплайна КРОМЕ последнего (модели) к X.
+    """Applies all pipeline steps EXCEPT the last (the model) to X.
 
-    Возвращаем (X_transformed, final_estimator).
+    Returns (X_transformed, final_estimator).
     """
     if not isinstance(pipe, Pipeline):
         return X, pipe
@@ -26,7 +26,7 @@ def _transform_X_through_pipeline(pipe: Pipeline, X: np.ndarray) -> tuple[np.nda
 
 
 def _explain_one(estimator, X_for_explainer: np.ndarray, X_background: np.ndarray) -> tuple[np.ndarray, float]:
-    """SHAP для одной модели (после извлечения из pipeline)."""
+    """SHAP for a single model (after extraction from the pipeline)."""
     is_tree_based = (
         hasattr(estimator, "feature_importances_")
         or hasattr(estimator, "estimators_")
@@ -40,12 +40,15 @@ def _explain_one(estimator, X_for_explainer: np.ndarray, X_background: np.ndarra
         sv = explainer.shap_values(X_for_explainer)
         if isinstance(sv, list):
             sv = sv[1] if len(sv) > 1 else sv[0]
+        sv = np.asarray(sv)
+        if sv.ndim == 3:                     # (rows, features, classes): keep the positive class
+            sv = sv[:, :, -1]
         ev = explainer.expected_value
         if isinstance(ev, (list, np.ndarray)):
             ev = float(np.asarray(ev).flatten()[-1])
         return np.asarray(sv), float(ev)
 
-    # Линейные модели
+    # Linear models
     explainer = shap.LinearExplainer(estimator, X_background)
     sv = explainer.shap_values(X_for_explainer)
     ev = explainer.expected_value
@@ -56,16 +59,30 @@ def _explain_one(estimator, X_for_explainer: np.ndarray, X_background: np.ndarra
 
 def compute_and_save_shap(model, X_latest: np.ndarray, feature_names: list, symbol_task: str,
                            X_background: np.ndarray | None = None):
-    """Корректный SHAP для Voting/Stacking/Pipeline/обычной модели.
-    StandardScaler внутри Pipeline применяется до Explainer.
+    """Correct SHAP for Voting/Stacking/Pipeline/plain models.
+    A StandardScaler inside the Pipeline is applied before the Explainer.
     """
-    print(f"[SHAP] {symbol_task}: запуск...")
+    print(f"[SHAP] {symbol_task}: running...")
     X_latest = np.asarray(X_latest)
     X_background = np.asarray(X_background) if X_background is not None else X_latest
 
     try:
-        if isinstance(model, (VotingClassifier, StackingClassifier)):
-            print(f"[SHAP] {symbol_task}: ансамбль ({type(model).__name__})")
+        if isinstance(model, StackingRegressor) and hasattr(model.final_estimator_, "coef_"):
+            # linear meta-model: the SHAP values of the stack are exactly the
+            # coefficient-weighted sum of the SHAP values of its members
+            print(f"[SHAP] {symbol_task}: stacking regressor with a linear meta-model")
+            coef = np.ravel(model.final_estimator_.coef_)
+            sv_sum, base_value = np.zeros((len(X_latest), X_latest.shape[1])), float(np.ravel(model.final_estimator_.intercept_)[0])
+            for c, est in zip(coef, model.estimators_):
+                Xl, final_est = _transform_X_through_pipeline(est, X_latest) if isinstance(est, Pipeline) else (X_latest, est)
+                Xb = _transform_X_through_pipeline(est, X_background)[0] if isinstance(est, Pipeline) else X_background
+                sv, ev = _explain_one(final_est, Xl, Xb)
+                sv_sum += c * np.asarray(sv).reshape(len(X_latest), -1)
+                base_value += c * ev
+            shap_values = sv_sum
+
+        elif isinstance(model, (VotingClassifier, StackingClassifier, VotingRegressor)):
+            print(f"[SHAP] {symbol_task}: ensemble ({type(model).__name__})")
             shap_values_list = []
             base_values = []
             estimators = (
@@ -73,7 +90,10 @@ def compute_and_save_shap(model, X_latest: np.ndarray, feature_names: list, symb
                 if hasattr(model, "named_estimators_") else
                 list(zip([f"e{i}" for i in range(len(model.estimators_))], model.estimators_))
             )
-            for name, est in estimators:
+            w_attr = getattr(model, "weights", None)
+            vote_w = [1.0] * len(estimators) if w_attr is None else [float(v) for v in w_attr]
+            used_w = []
+            for (name, est), w in zip(estimators, vote_w):
                 if isinstance(est, Pipeline):
                     Xl, final_est = _transform_X_through_pipeline(est, X_latest)
                     Xb, _ = _transform_X_through_pipeline(est, X_background)
@@ -85,15 +105,20 @@ def compute_and_save_shap(model, X_latest: np.ndarray, feature_names: list, symb
                     sv, ev = _explain_one(final_est, Xl, Xb)
                     shap_values_list.append(sv)
                     base_values.append(ev)
+                    used_w.append(float(w))
                 except Exception as e:
-                    print(f"[SHAP] {symbol_task}: пропустил {name} ({e})")
+                    print(f"[SHAP] {symbol_task}: skipped {name} ({e})")
 
             if not shap_values_list:
-                raise RuntimeError("Не удалось посчитать SHAP ни для одной подмодели")
+                raise RuntimeError("Could not compute SHAP for any sub-model")
 
+            # members are combined with the voting weights; note that tree members are
+            # explained on their raw (log-odds) scale, so the result is an attribution
+            # of the weighted member scores rather than of the averaged probability
             arr = np.stack([np.asarray(s).reshape(len(X_latest), -1) for s in shap_values_list], axis=0)
-            shap_values = arr.mean(axis=0)
-            base_value = float(np.mean(base_values))
+            wts = np.asarray(used_w) / np.sum(used_w)
+            shap_values = np.tensordot(wts, arr, axes=1)
+            base_value = float(np.dot(wts, base_values))
 
         elif isinstance(model, Pipeline):
             Xl, final_est = _transform_X_through_pipeline(model, X_latest)
@@ -114,14 +139,14 @@ def compute_and_save_shap(model, X_latest: np.ndarray, feature_names: list, symb
             "shap_values": first_row,
             "feature_names": list(feature_names),
             "base_value": float(base_value),
-            "generated_at": pd.Timestamp.utcnow().isoformat()
+            "generated_at": pd.Timestamp.now("UTC").isoformat()
         }
 
         filepath = ARTIFACTS / f"shap_{symbol_task}.json"
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
 
-        print(f"[SHAP] {symbol_task}: сохранено → {filepath}")
+        print(f"[SHAP] {symbol_task}: saved -> {filepath}")
         return result
 
     except Exception as e:

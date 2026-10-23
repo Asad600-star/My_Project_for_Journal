@@ -1,0 +1,161 @@
+loss,symbol,model,in_mcs,pvalue
+squared error,AAPL,GARCH,True,0.247
+squared error,AAPL,GJR,True,0.7875
+squared error,AAPL,HAR,True,0.247
+squared error,AAPL,HAR_RG,True,0.84
+squared error,AAPL,ECON,True,0.84
+squared error,AAPL,ET,False,0.001
+squared error,AAPL,H_GARCH,True,0.223
+squared error,AAPL,H_GJR,True,0.84
+squared error,AAPL,H_HAR_RG,True,0.84
+squared error,AAPL,H_ECON,True,1.0
+squared error,GLD,GARCH,True,0.1035
+squared error,GLD,GJR,True,0.947
+squared error,GLD,HAR,True,0.114
+squared error,GLD,HAR_RG,True,0.947
+squared error,GLD,ECON,True,0.947
+squared error,GLD,ET,True,0.8955
+squared error,GLD,H_GARCH,True,0.2755
+squared error,GLD,H_GJR,True,0.915
+squared error,GLD,H_HAR_RG,True,1.0
+squared error,GLD,H_ECON,True,0.947
+squared error,MSFT,GARCH,False,0.006
+squared error,MSFT,GJR,True,0.2285
+squared error,MSFT,HAR,False,0.026
+squared error,MSFT,HAR_RG,True,0.9585
+squared error,MSFT,ECON,True,0.9585
+squared error,MSFT,ET,False,0.018
+squared error,MSFT,H_GARCH,False,0.006
+squared error,MSFT,H_GJR,True,0.1565
+squared error,MSFT,H_HAR_RG,True,0.9585
+squared error,MSFT,H_ECON,True,1.0
+squared error,TSLA,GARCH,True,0.1485
+squared error,TSLA,GJR,False,0.074
+squared error,TSLA,HAR,False,0.003
+squared error,TSLA,HAR_RG,True,0.1895
+squared error,TSLA,ECON,True,0.1895
+squared error,TSLA,ET,False,0.0425
+squared error,TSLA,H_GARCH,True,0.1895
+squared error,TSLA,H_GJR,True,0.1485
+squared error,TSLA,H_HAR_RG,True,1.0
+squared error,TSLA,H_ECON,True,0.299
+squared error,^DJI,GARCH,False,0.005
+squared error,^DJI,GJR,True,0.25
+squared error,^DJI,HAR,False,0.0
+squared error,^DJI,HAR_RG,True,0.1645
+squared error,^DJI,ECON,True,0.25
+squared error,^DJI,ET,False,0.015
+squared error,^DJI,H_GARCH,False,0.016
+squared error,^DJI,H_GJR,True,0.25
+squared error,^DJI,H_HAR_RG,True,0.25
+squared error,^DJI,H_ECON,True,1.0
+squared error,^GSPC,GARCH,False,0.047
+squared error,^GSPC,GJR,True,0.9295
+squared error,^GSPC,HAR,False,0.0075
+squared error,^GSPC,HAR_RG,False,0.047
+squared error,^GSPC,ECON,True,1.0
+squared error,^GSPC,ET,False,0.047
+squared error,^GSPC,H_GARCH,False,0.05
+squared error,^GSPC,H_GJR,True,0.1925
+squared error,^GSPC,H_HAR_RG,False,0.068
+squared error,^GSPC,H_ECON,True,0.31
+squared error,^IXIC,GARCH,False,0.093
+squared error,^IXIC,GJR,True,1.0
+squared error,^IXIC,HAR,False,0.0115
+squared error,^IXIC,HAR_RG,True,0.472
+squared error,^IXIC,ECON,True,0.866
+squared error,^IXIC,ET,True,0.1395
+squared error,^IXIC,H_GARCH,True,0.1395
+squared error,^IXIC,H_GJR,True,0.5385
+squared error,^IXIC,H_HAR_RG,True,0.494
+squared error,^IXIC,H_ECON,True,0.699
+squared error,^RUT,GARCH,False,0.0055
+squared error,^RUT,GJR,True,0.2455
+squared error,^RUT,HAR,False,0.0005
+squared error,^RUT,HAR_RG,False,0.0095
+squared error,^RUT,ECON,True,0.7805
+squared error,^RUT,ET,True,0.336
+squared error,^RUT,H_GARCH,True,0.325
+squared error,^RUT,H_GJR,True,0.627
+squared error,^RUT,H_HAR_RG,False,0.029
+squared error,^RUT,H_ECON,True,1.0
+QLIKE,AAPL,GARCH,False,0.0145
+QLIKE,AAPL,GJR,False,0.019
+QLIKE,AAPL,HAR,False,0.019
+QLIKE,AAPL,HAR_RG,True,0.2085
+QLIKE,AAPL,ECON,False,0.038
+QLIKE,AAPL,ET,False,0.038
+QLIKE,AAPL,H_GARCH,False,0.0275
+QLIKE,AAPL,H_GJR,True,0.1925
+QLIKE,AAPL,H_HAR_RG,True,0.954
+QLIKE,AAPL,H_ECON,True,1.0
+QLIKE,GLD,GARCH,True,0.203
+QLIKE,GLD,GJR,True,0.6175
+QLIKE,GLD,HAR,False,0.073
+QLIKE,GLD,HAR_RG,True,0.236
+QLIKE,GLD,ECON,True,0.6005
+QLIKE,GLD,ET,True,0.713
+QLIKE,GLD,H_GARCH,True,0.6175
+QLIKE,GLD,H_GJR,True,0.6175
+QLIKE,GLD,H_HAR_RG,True,0.4455
+QLIKE,GLD,H_ECON,True,1.0
+QLIKE,MSFT,GARCH,False,0.0
+QLIKE,MSFT,GJR,False,0.0065
+QLIKE,MSFT,HAR,False,0.0
+QLIKE,MSFT,HAR_RG,False,0.0275
+QLIKE,MSFT,ECON,False,0.0135
+QLIKE,MSFT,ET,False,0.0275
+QLIKE,MSFT,H_GARCH,False,0.0095
+QLIKE,MSFT,H_GJR,False,0.0025
+QLIKE,MSFT,H_HAR_RG,True,1.0
+QLIKE,MSFT,H_ECON,False,0.0475
+QLIKE,TSLA,GARCH,False,0.0175
+QLIKE,TSLA,GJR,False,0.076
+QLIKE,TSLA,HAR,False,0.005
+QLIKE,TSLA,HAR_RG,False,0.031
+QLIKE,TSLA,ECON,False,0.066
+QLIKE,TSLA,ET,True,0.237
+QLIKE,TSLA,H_GARCH,True,0.3045
+QLIKE,TSLA,H_GJR,True,0.1645
+QLIKE,TSLA,H_HAR_RG,True,0.7125
+QLIKE,TSLA,H_ECON,True,1.0
+QLIKE,^DJI,GARCH,False,0.0005
+QLIKE,^DJI,GJR,False,0.005
+QLIKE,^DJI,HAR,False,0.0
+QLIKE,^DJI,HAR_RG,False,0.047
+QLIKE,^DJI,ECON,True,0.1155
+QLIKE,^DJI,ET,True,0.543
+QLIKE,^DJI,H_GARCH,False,0.043
+QLIKE,^DJI,H_GJR,False,0.021
+QLIKE,^DJI,H_HAR_RG,True,1.0
+QLIKE,^DJI,H_ECON,True,0.543
+QLIKE,^GSPC,GARCH,False,0.0075
+QLIKE,^GSPC,GJR,False,0.039
+QLIKE,^GSPC,HAR,False,0.0
+QLIKE,^GSPC,HAR_RG,True,0.2365
+QLIKE,^GSPC,ECON,True,0.243
+QLIKE,^GSPC,ET,True,1.0
+QLIKE,^GSPC,H_GARCH,True,0.3015
+QLIKE,^GSPC,H_GJR,False,0.0585
+QLIKE,^GSPC,H_HAR_RG,True,0.626
+QLIKE,^GSPC,H_ECON,True,0.626
+QLIKE,^IXIC,GARCH,False,0.005
+QLIKE,^IXIC,GJR,True,0.14
+QLIKE,^IXIC,HAR,False,0.0005
+QLIKE,^IXIC,HAR_RG,True,0.198
+QLIKE,^IXIC,ECON,True,0.307
+QLIKE,^IXIC,ET,True,0.8205
+QLIKE,^IXIC,H_GARCH,True,0.307
+QLIKE,^IXIC,H_GJR,True,0.123
+QLIKE,^IXIC,H_HAR_RG,True,1.0
+QLIKE,^IXIC,H_ECON,True,0.8205
+QLIKE,^RUT,GARCH,False,0.0
+QLIKE,^RUT,GJR,False,0.002
+QLIKE,^RUT,HAR,False,0.0
+QLIKE,^RUT,HAR_RG,True,0.8045
+QLIKE,^RUT,ECON,True,0.381
+QLIKE,^RUT,ET,True,0.5365
+QLIKE,^RUT,H_GARCH,True,0.3195
+QLIKE,^RUT,H_GJR,False,0.0325
+QLIKE,^RUT,H_HAR_RG,True,0.8045
+QLIKE,^RUT,H_ECON,True,1.0

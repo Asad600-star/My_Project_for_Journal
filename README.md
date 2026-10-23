@@ -1,311 +1,129 @@
-# Master of Degree: Прогнозирование направления и волатильности акций
+# Risk-aware conformal control in an auditable production-rule expert system
 
-**Тема дипломной работы:**  
-Разработка программы для прогнозирования направления и волатильности цен акций и фондовых индексов с использованием гибридных моделей машинного обучения.
+Code and data for the paper *"Risk-aware conformal control in an auditable
+production-rule expert system for stock direction and volatility forecasting"*.
 
----
+The system forecasts the 5-day direction and realised volatility of eight
+instruments (AAPL, TSLA, MSFT, GLD, S&P 500, NASDAQ Composite, Dow Jones,
+Russell 2000) from a 56-dimensional causal feature vector, and turns the
+forecasts into auditable decisions:
 
-## 📋 О проекте
+- **Direction:** HYBRID_VOTING, a soft-voting ensemble of five learners, with
+  isotonic (PAV) calibration fitted on the most recent block the ensemble has
+  not been trained on.
+- **Volatility:** H-ECON-ET, an ExtraTrees correction of the equal-weight
+  average of GARCH(1,1), GJR-GARCH(1,1)-t and a range-based HAR model, with the
+  blend weight chosen on validation data.
+- **Rules:** 66 production rules read off the paths of a CART tree (training block purged at its end).
+- **Risk module:** Value-at-Risk with an asymmetric multiplier and a banded
+  position size (10% / 5% / 0% of capital).
+- **RACC:** Risk-Aware Conformal Control, a decision layer that abstains unless
+  the expected volatility-scaled loss can be kept below a chosen level. The
+  models are fitted on a training block, the calibrator and fusion weight on a
+  separate tuning block and the threshold on a calibration block. The static
+  form has a finite-sample bound under exchangeability (Proposition 1); the
+  online form bounds the long-run risk for any data sequence (Proposition 2).
+- **Interfaces:** a Streamlit dashboard and a Telegram bot, refreshed daily.
 
-Это **полноценная production-система** машинного обучения, которая:
-- Прогнозирует **направление** цены на 5 дней вперёд (рост/падение)
-- Прогнозирует **волатильность** на 5 дней вперёд
-- Выдаёт **рекомендацию** инвестору: «Покупать», «Не покупать», «Задуматься о покупке»
-- Рассчитывает **риск-менеджмент** (VaR, размер позиции, уровень риска)
-- Объясняет решение модели с помощью **SHAP**
-- Имеет удобный **веб-сайт** и **Telegram-бот**
+## Main results (22 expanding walk-forward folds per instrument)
 
-**Анализируемые инструменты:** AAPL, TSLA, ^GSPC (S&P 500), ^IXIC (NASDAQ)
+| Result | Value | Artefact |
+|---|---|---|
+| Volatility: mean test RMSE | H-ECON-ET 0.00604; ECON 0.00606; GJR-GARCH 0.00612; GARCH 0.00625; ExtraTrees 0.00678 | `artifacts/metrics_walk_volatility_k5.csv` |
+| Volatility: mean QLIKE loss | H-ECON-ET 0.431; ECON 0.457; GARCH 0.504 | `artifacts/volatility_models_summary_k5.csv` |
+| 90% model confidence set (squared error / QLIKE) | H-ECON-ET 8/8 and 7/8 instruments, the only model with at least 7 under both | `artifacts/volatility_mcs_k5.csv` |
+| Daily Diebold-Mariano, H-ECON-ET vs GARCH | better on 6/8 (squared error) and 7/8 (QLIKE) instruments, never worse | `artifacts/volatility_dm_daily_k5.csv` |
+| Out-of-sample R² of H-ECON-ET vs historical mean | positive on 8/8 instruments (0.18 to 0.39) | `artifacts/metrics_walk_volatility_k5.csv` |
+| Direction: mean test AUC of every model | 0.48 to 0.55 (no exploitable skill) | `artifacts/metrics_walk_direction_k5.csv` |
+| Static RACC, 2024-2026 test period | bound holds at 62% of the risk levels; fails for α = 0.35-0.60 after a shift of the signal | `artifacts/racc_results.csv` |
+| Static RACC, 2022 bear market | worst excess over the target 0.32 | `artifacts/racc_regime_stress.csv` |
+| Online RACC, 2024-2026 / 2022 / 2020 | worst excess 0.009 / 0.014 / 0.051 (Proposition 2 allows 0.077 / 0.18 / 0.44) | `artifacts/racc_regime_stress.csv` |
+| RACC back-test (λ = 0.5), maximum drawdown | 23.9% ungated, 18.2% static and 12.5% online (α = 0.30); online return 3.7% vs 17.0% ungated | `artifacts/racc_backtest_portfolio.csv` |
+| Deflated Sharpe ratio of the best of 20 configurations | 0.205 (below the usual 0.95 level) | `artifacts/robustness_dsr.csv` |
+| Decision pipeline vs buy-and-hold (2022-2026) | 0.22% per year vs 0.89% to 22.9% | `artifacts/backtest_summary.csv` |
 
----
-
-## 🛠 Технологический стек
-
-- **Язык:** Python 3.13
-- **База данных:** PostgreSQL + Docker
-- **Модели:** Гибридный ensemble (LightGBM + XGBoost + Logistic Regression + VotingClassifier)
-- **Объяснимость:** SHAP
-- **Веб-интерфейс:** Streamlit
-- **Telegram-бот:** aiogram + APScheduler
-- **Оркестрация:** Docker Compose
-
----
-
-## 📁 Структура проекта
-
-Master_of_Degree/
-├── .env                          ← Основные настройки
-├── docker-compose.yml
-├── requirements.txt
-├── README.md
-├── jobs/                         ← Основные скрипты
-│   ├── ingest_prices.py          ← Загрузка цен
-│   ├── build_features.py         ← Создание признаков
-│   ├── train_baseline.py         ← Обучение и inference
-│   ├── daily_update.py           ← Ежедневное обновление (главная команда)
-│   └── bot.py                    ← Telegram-бот
-├── services/
-│   └── predict.py                ← Основная функция предсказания
-├── core/                         ← Ядро проекта (SHAP + Risk Manager)
-├── apps/web/main.py              ← Веб-сайт на Streamlit
-├── artifacts/                    ← Все результаты (модели, метрики, предсказания)
-├── users.json                    ← Информация о пользователях
-└── subscribers.json              ← Подписчики на уведомления
-
-
----
-
-## 🚀 Установка и первый запуск
-
-### 1. Запуск базы данных
-```bash
-docker-compose up -d
-
-2. Активация виртуального окружения
-source .venv/bin/activate
-
-3. Установка зависимостей
-pip install -r requirements.txt
-
-4. Первый запуск проекта (выполнить один раз)
-# 1. Загрузка исторических данных
-python -m jobs.ingest_prices
-
-# 2. Создание признаков
-python -m jobs.build_features
-
-# 3. Обучение и обновление предсказаний
-env ACTION=infer TASK=direction python -m jobs.train_baseline
-env ACTION=infer TASK=volatility python -m jobs.train_baseline
-
-📅 Ежедневная работа с проектом
-Самая важная команда (запускай каждый день после 19:00):
-python -m jobs.daily_update
-
-🔄 Переобучение модели
-Переобучать модель рекомендуется 1 раз в 2–4 недели или при значительном изменении рынка.
-# Полное переобучение (walk-forward)
-env MODE=walk TASK=direction python -m jobs.train_baseline
-env MODE=walk TASK=volatility python -m jobs.train_baseline
-
-После переобучения обязательно обнови предсказания:
-env ACTION=infer TASK=direction python -m jobs.train_baseline
-env ACTION=infer TASK=volatility python -m jobs.train_baseline
-
-🌐 Запуск веб-сайта (Streamlit)
-streamlit run apps/web/main.py
-
-🤖 Запуск Telegram-бота
-cd /Users/asadbekikromov/Documents/GitHub/Master_of_Degree
-source .venv/bin/activate
-python jobs/bot.py
-
-🔧 Полезные команды
-Команда,                                                            Описание
-python -m jobs.ingest_prices,                                       Загрузить/обновить цены
-python -m jobs.build_features,                                      Пересчитать признаки
-python -m jobs.daily_update,                                        Главное ежедневное обновление
-env ACTION=infer TASK=direction python -m jobs.train_baseline,      Обновить предсказания направления
-env ACTION=infer TASK=volatility python -m jobs.train_baseline,     Обновить предсказания волатильности
-
-📊 Как интерпретировать результаты
-p_up — вероятность роста за 5 дней
-vol_pred — ожидаемая волатильность
-recommendation_ru — рекомендация модели
-confidence — уровень уверенности
-risk_summary_ru — рекомендации по риску
-
-Хороший сигнал на покупку:
-p_up > 0.60 + риск: низкий + position_size: 8-12%
-
-⚙️ Настройка параметров
-Все основные настройки находятся в файле .env:
-
-TRAIN_START_DATE=2022-01-01 — с какой даты обучать модель
-HORIZON_DAYS=5 — горизонт прогнозирования
-Другие параметры можно менять по необходимости
-
-Автор: Асадбек Икромов
-Год: 2026
-
-
----
-
-## 🔬 Воспроизведение результатов статьи (Q1 paper)
-
-Эта система лежит в основе научной статьи "Mathematical Representation of
-Decision-Making for Hybrid Forecasting of Stock Price Direction and Volatility
-Based on Production Logic".
-
-### Полное воспроизведение одной командой
-
-```bash
-bash reproduce_results.sh
-```
-
-Скрипт воспроизводит **все** числа из статьи end-to-end: от загрузки сырых
-данных через yfinance до финальных таблиц. Зафиксировано для воспроизводимости:
-`SEED=42`, `END_DATE=2026-06-01`, `TRAIN_START_DATE=2015-01-01`.
-
-### Экспериментальный протокол
-
-- **8 инструментов:** AAPL, TSLA, MSFT, GLD, S&P 500, NASDAQ, Dow Jones, Russell 2000
-- **3 макро-индикатора (признаки):** ^VIX, ^IRX, ^TNX
-- **Walk-forward CV:** ~22 фолда (min_train=1200, val=126, test=126, step=63)
-- **Baselines:** LSTM (deep learning), ARIMA + GARCH (эконометрика), vanilla XGB/LGBM
-- **Статистика:** Diebold-Mariano test (HLN-корректировка) + bootstrap 95% CI (B=1000)
-
-### Ключевые скрипты экспериментов
-
-| Скрипт | Назначение |
-|--------|-----------|
-| `jobs/train_baseline.py` | HYBRID_VOTING, HYBRID_STACK, ExtraTrees, vanilla baselines |
-| `jobs/train_lstm_baseline.py` | LSTM baseline (PyTorch, MPS/CUDA/CPU) |
-| `jobs/train_arima_garch_baseline.py` | ARIMA + GARCH эконометрические baselines |
-| `jobs/diebold_mariano_test.py` | Тест статистической значимости (HLN) |
-| `jobs/ablation_study.py` | Вклад групп признаков |
-| `jobs/generate_paper_tables.py` | Генерация всех таблиц статьи |
-
-### Основные результаты
-
-- **Volatility:** ExtraTrees / HYBRID_STACK_REG превосходят ARIMA на **40%** и
-  GARCH на **33%** по среднему RMSE (значимо по Diebold-Mariano на большинстве
-  инструментов).
-- **Direction:** прогноз направления на дневных данных близок к случайному
-  (mean AUC 0.48–0.55 у всех моделей, включая LSTM), что согласуется с
-  гипотезой эффективного рынка. Главный вклад работы — интерпретируемая,
-  воспроизводимая система с 150 продукционными правилами и риск-модулем.
-
----
-
-# 🧑‍🔬 Quick Start for Reviewers
-
-This section gives a step-by-step guide to run the system and verify the
-claims made in the paper. Two independent paths are provided: a **live demo**
-(web app + Telegram bot) and a **full reproduction** of every reported number.
-
-## Prerequisites
-
-- **Python 3.13**
-- **Docker** (for the bundled PostgreSQL database)
-- macOS / Linux (the LSTM baseline auto-detects Apple MPS, NVIDIA CUDA, or CPU)
+Daily direction is close to unpredictable for every model tested, and no
+active policy beats buy-and-hold. The contribution of the system is the
+risk-controlled, auditable decision layer, not a trading edge.
 
 ## Installation
 
 ```bash
-# 1. Clone the repository
-git clone <REPO_URL>
-cd hybrid-stock-forecasting
-
-# 2. Create environment and install dependencies
-python3 -m venv .venv
+python3.13 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-
-# 3. Configure environment variables
-cp .env.example .env
-# (the defaults work out of the box; edit only if you change DB credentials
-#  or want to run the Telegram bot — then add your own BotFather token)
-
-# 4. Start the PostgreSQL database
-docker-compose up -d
+pip install -r requirements-lock.txt   # exact versions used for the paper
+cp .env.example .env                   # defaults work with the bundled database
+docker-compose up -d                   # PostgreSQL
 ```
 
-## Option A — Reproduce the paper results (recommended for verification)
-
-A single script regenerates every number, table, and metric reported in the
-paper, end to end, from raw market data:
+## Reproducing the paper
 
 ```bash
 bash reproduce_results.sh
 ```
 
-This will:
-1. Ingest OHLCV data from Yahoo Finance for 8 instruments + 3 macro indicators.
-2. Build the 56-dimensional causal feature matrix.
-3. Train the hybrid models, ExtraTrees, and all baselines (LSTM, ARIMA, GARCH,
-   vanilla XGB/LGBM) under walk-forward cross-validation.
-4. Run the sensitivity analysis (K = 5, 10, 20), the ablation study, and the
-   Diebold-Mariano significance test.
-5. Write all comparison tables to `artifacts/paper_tables.txt`.
+The script loads the frozen market-data snapshot (`data/market_ohlcv_snapshot.csv`),
+rebuilds the features and regenerates every table and figure, with all settings
+pinned (seed 42, data up to 2026-06-01, k = 5 with training data from 2015, k = 10
+and 20 from 2017). `REFRESH_DATA=1 bash reproduce_results.sh` downloads the data
+from Yahoo Finance instead. Figures are written to `figures/` with the numbers of
+the paper (`fig01_architecture.png` ... `fig14_pr_rules.png`); the run takes about
+10 hours on an Apple M4, mostly for the walk-forward models and the horizon sensitivity.
 
-**Reproducibility is pinned** (`SEED=42`, `END_DATE=2026-06-01`,
-`TRAIN_START_DATE=2015-01-01`), so the output matches the paper. A static data
-snapshot is included in `data/market_ohlcv_snapshot.csv` in case the live API
-is unavailable.
+| Paper element | Script |
+|---|---|
+| Tables 5-6, walk-forward models | `jobs/train_baseline.py`, `jobs/train_deep_baselines.py` |
+| GARCH and HAR baselines | `jobs/econometric_baselines.py` |
+| GJR-GARCH, range-based HAR, H-ECON-ET, QLIKE, MCS, daily DM (Tables 6-7) | `jobs/volatility_models.py` |
+| Figs. 3-4 (Friedman-Nemenyi), fold-level Diebold-Mariano | `jobs/statistical_tests.py`, `jobs/diebold_mariano_test.py` |
+| Table 8 (rule stability), Table 3 and Appendix A (rules) | `jobs/rule_stability.py`, `jobs/extract_rules_from_tree.py` |
+| Table 9 (horizons), Table 10 (ablation), Fig. 5 (SHAP) | `jobs/sensitivity_analysis.py`, `jobs/ablation_study.py`, `jobs/shap_walkforward.py` |
+| Table 11 (back-test of the decision pipeline) | `jobs/backtest.py` |
+| Tables 12-15, Figs. 7-9 (RACC) | `jobs/racc.py`, `jobs/racc_backtest.py`, `jobs/racc_regime_stress.py` |
+| Tables 15-17, deflated Sharpe ratio | `jobs/robustness_checks.py` |
+| Figs. 1, 2, 6 and 10-12 | `jobs/make_diagram_figures.py`, `jobs/make_paper_figures.py` |
 
-Expected total runtime: ~3-5 hours on a modern laptop (the walk-forward
-training of hybrid ensembles across 8 instruments and 3 horizons is the
-dominant cost).
-
-### How to verify the key claims
-
-| Claim in paper | Where to check |
-|----------------|----------------|
-| ExtraTrees beats ARIMA/GARCH by ~40%/33% in mean RMSE | `artifacts/paper_tables.txt`, Table B2 |
-| Difference is statistically significant | `artifacts/dm_test_results.csv` (p-values) |
-| Direction AUC is near the no-skill boundary for all models | `artifacts/paper_tables.txt`, Table B1 |
-| Feature groups each contribute (ablation) | `artifacts/ablation_pivot.csv` |
-| Robustness across horizons | `artifacts/metrics_walk_volatility_k{5,10,20}.csv` |
-
-## Option B — Live demo (interactive)
-
-To see the system in action on current market data:
+## Tests
 
 ```bash
-source .venv/bin/activate
-
-# Web dashboard (opens in browser at http://localhost:8501)
-streamlit run apps/web/main.py
+python -m pytest -q tests
 ```
 
-In the dashboard you can select any of the 8 instruments and any of the 3
-forecast horizons (5, 10, 20 days). For each request the system returns the
-calibrated up-probability, the forecast volatility, a Value-at-Risk based
-recommendation, and the SHAP attribution explaining the decision.
+The suite checks that every feature and the GARCH and HAR forecasts use only
+past data, that the targets are purged inside each walk-forward block, that the
+risk module implements Equations 25-28 and the banded sizing rule, the conformal
+threshold of Proposition 1 on its fixed grid and its risk guarantee under
+exchangeability, that the RACC score does not depend on the calibration labels, the
+long-run bound of Proposition 2 on a sequence with abrupt regime switches, the
+Diebold-Mariano test, the deflated Sharpe ratio and the SHAP attribution of the
+voting ensemble.
 
-> Note: the first request for a given (symbol, horizon) trains the selected
-> model on the fly (1-2 minutes); subsequent requests are instant.
-
-Optionally, the Telegram bot:
+## Daily operation
 
 ```bash
-# add your BotFather token to .env first (TELEGRAM_BOT_TOKEN)
-python -m jobs.bot
+python -m jobs.daily_update          # prices -> features -> calibrated forecasts
+streamlit run apps/web/main.py       # dashboard at http://localhost:8501
+python -m jobs.bot                   # Telegram bot (set TELEGRAM_BOT_TOKEN in .env)
 ```
+
+A step-by-step guide in Russian is in `GUIDE_RU.md`.
 
 ## Repository layout
 
 ```
-jobs/        data ingestion, feature building, training, baselines, evaluation
-core/        risk manager, SHAP explainer
-services/    high-level prediction service used by the UI
+jobs/        ingestion, features, models, baselines, RACC, evaluation, figures
+core/        risk manager and SHAP explainer
+services/    prediction service used by the user interfaces
 apps/web/    Streamlit dashboard
-data/        static market-data snapshot for offline reproduction
-artifacts/   metrics, SHAP values, comparison tables (results)
-reproduce_results.sh   single-command full reproduction
+data/        frozen market-data snapshot
+artifacts/   metrics and result tables used in the paper
+tests/       unit tests
 ```
 
-## Notes on honest reporting
+`jobs/train_arima_garch_baseline.py` and `jobs/train_lstm_baseline.py` are kept
+for the record only; they are superseded by `jobs/econometric_baselines.py` and
+`jobs/train_deep_baselines.py` and are not used in the paper.
 
-The paper reports results as they are. Directional prediction on daily data is
-close to the no-skill boundary for **every** model tested, including the
-deep-learning LSTM baseline; this is consistent with weak-form market
-efficiency and is discussed in the Limitations section. The system's
-quantitative strength is in volatility forecasting and in providing an
-auditable, rule-based, fully reproducible decision pipeline.
+## License
 
-## Economic back-test (honest reporting)
-
-An event-driven back-test (`jobs/backtest.py`, ~3.2 years, 5 bps per trade) shows
-that the rule-gated trading strategy **does not beat passive buy-and-hold**: its
-annualised return is near zero on every instrument while buy-and-hold returned
-4-47% per year over the same bull-market window. This is the expected outcome
-given that daily directional accuracy is near the no-skill boundary, and it is a
-direct empirical confirmation of weak-form market efficiency. We report it
-openly: the value of the system is in calibrated volatility forecasting,
-interpretability, and reproducibility, not in a trading edge.
-
-```bash
-python -m jobs.backtest   # regenerates the back-test table
-```
+MIT (see `LICENSE`).

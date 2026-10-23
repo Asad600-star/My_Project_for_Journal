@@ -1,0 +1,5 @@
+train_window,train_rows,years,volatility_rmse,direction_auc
+Expanding (all history),15440,7.7,0.00755,0.515
+Last 1500 days,12000,6.0,0.00756,0.512
+Last 1000 days,8000,4.0,0.00754,0.52
+Last 500 days,4000,2.0,0.00785,0.533

@@ -70,9 +70,9 @@ with c3:
               result["risk_label_ru"] if is_ru else result["risk_label_en"])
 
 if is_ru:
-    st.info(f"**Вероятность роста ({horizon} дней):** {result['p_up']:.1%} | **Ожидаемая волатильность ({horizon} дней):** {result['vol_pred']:.2%}")
+    st.info(f"**Вероятность роста ({horizon} дней):** {result['p_up']:.1%} | **Ожидаемая дневная волатильность (следующие {horizon} дней):** {result['vol_pred']:.2%}")
 else:
-    st.info(f"**Probability of rise ({horizon}d):** {result['p_up']:.1%} | **Expected {horizon}d volatility:** {result['vol_pred']:.2%}")
+    st.info(f"**Probability of rise ({horizon}d):** {result['p_up']:.1%} | **Expected daily volatility (next {horizon} days):** {result['vol_pred']:.2%}")
 
 st.subheader("🛡️ Risk Management")
 st.success(result["risk_summary_ru"] if is_ru else result["risk_summary_en"])
@@ -143,7 +143,7 @@ if shap_file.exists():
         height=500,
         template="plotly_dark",
         title="Топ-12 факторов, которые повлияли на решение модели" if is_ru else "Top-12 factors driving the prediction",
-        xaxis_title="Вклад в вероятность роста" if is_ru else "Contribution to P(up)",
+        xaxis_title="Вклад в оценку модели (log-odds)" if is_ru else "Contribution to the model score (log-odds)",
         yaxis_title=""
     )
     st.plotly_chart(fig_shap, width='stretch')

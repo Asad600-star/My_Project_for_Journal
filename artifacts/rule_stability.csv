@@ -1,0 +1,2 @@
+bootstraps,rules_published,rules_mean,rules_sd,pairwise_action_agreement,agreement_with_published,feature_set_jaccard,features_used_in_all_runs,features_used_in_80pct
+20,66,67.3,5.3,0.527,0.533,0.563,5,16
