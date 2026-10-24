@@ -125,10 +125,6 @@ artifacts/   metrics and result tables used in the paper
 tests/       unit tests
 ```
 
-`jobs/train_arima_garch_baseline.py` and `jobs/train_lstm_baseline.py` are kept
-for the record only; they are superseded by `jobs/econometric_baselines.py` and
-`jobs/train_deep_baselines.py` and are not used in the paper.
-
 ## License
 
 MIT (see `LICENSE`).

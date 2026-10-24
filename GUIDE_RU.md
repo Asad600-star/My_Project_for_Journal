@@ -119,7 +119,7 @@ python -m jobs.daily_update
 
 Загружает новые цены всех 8 инструментов и ^VIX, ^IRX, ^TNX, пересчитывает признаки и прогнозы на 5, 10 и 20 дней (`artifacts/predictions_latest_k*.csv`).
 
-> Таблицы статьи строятся из `artifacts/` (см. `reproduce_results.sh`); старый скрипт `jobs.generate_paper_tables` больше не используется.
+> Таблицы статьи строятся из `artifacts/` (см. `reproduce_results.sh`).
 
 ---
 
