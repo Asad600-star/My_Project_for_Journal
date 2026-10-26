@@ -3,7 +3,7 @@ Econometric volatility baselines evaluated on exactly the walk-forward folds of
 the machine-learning models.
 =============================================================================
 
-The earlier ARIMA/GARCH script (train_arima_garch_baseline.py) evaluated the
+An earlier ARIMA/GARCH baseline, since removed from the repository, evaluated the
 econometric models on their own fold grid and held a single forecast constant
 over each 126-day test block. That makes the comparison with daily-updated
 machine-learning forecasts unfair. This script replaces it with:
